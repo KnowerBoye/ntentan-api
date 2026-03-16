@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MedScan — Bottle Scanner Demo</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  :root {
+    --bg:       #0a0d12;
+    --surface:  #111620;
+    --border:   #1e2535;
+    --accent:   #00e5a0;
+    --warn:     #ffb800;
+    --danger:   #ff4757;
+    --text:     #e8eaf0;
+    --muted:    #5a6070;
+    --radius:   12px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 28px;
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(10,13,18,0.92);
+    backdrop-filter: blur(12px);
+  }
+
+  .logo {
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .logo span { color: var(--accent); }
+
+  .ws-badge {
+    display: flex; align-items: center; gap: 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 99px;
+  }
+  .ws-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+  .ws-dot.connected   { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .ws-dot.connecting  { background: var(--warn);   animation: pulse 1s infinite; }
+  .ws-dot.error       { background: var(--danger); }
+
+  /* ── Layout ── */
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 0;
+    height: calc(100vh - 61px);
+  }
+
+  /* ── Camera Panel ── */
+  .camera-panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .video-wrap {
+    position: relative;
+    flex: 1;
+    background: #000;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  video {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* scan-line overlay */
+  .scanline {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 3px,
+      rgba(0,0,0,0.08) 3px,
+      rgba(0,0,0,0.08) 4px
+    );
+  }
+
+  /* corner brackets */
+  .bracket {
+    position: absolute;
+    width: 52px; height: 52px;
+    pointer-events: none;
+    transition: border-color 0.4s;
+  }
+  .bracket.tl { top: 24px; left: 24px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+  .bracket.tr { top: 24px; right: 24px; border-top: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+  .bracket.bl { bottom: 24px; left: 24px; border-bottom: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+  .bracket.br { bottom: 24px; right: 24px; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+  .bracket.warn { border-color: var(--warn) !important; }
+  .bracket.success-color { border-color: var(--accent) !important; }
+
+  /* scanning sweep */
+  .sweep {
+    position: absolute;
+    left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(to right, transparent, var(--accent), transparent);
+    opacity: 0;
+    pointer-events: none;
+    top: 0;
+  }
+  .sweep.active {
+    opacity: 1;
+    animation: sweep 2s linear infinite;
+  }
+
+  /* direction arrow overlay */
+  .arrow-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .arrow-bubble {
+    background: rgba(0,0,0,0.72);
+    border: 1.5px solid var(--warn);
+    border-radius: 14px;
+    padding: 10px 20px;
+    font-size: 2.2rem;
+    display: none;
+    animation: popIn 0.25s ease;
+    backdrop-filter: blur(4px);
+  }
+  .arrow-bubble.show { display: block; }
+
+  /* no-object overlay */
+  .empty-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(10,13,18,0.7);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s;
+    backdrop-filter: blur(2px);
+  }
+  .empty-overlay.show { opacity: 1; }
+  .empty-icon { font-size: 3rem; }
+  .empty-text { font-size: 0.95rem; color: var(--muted); text-align: center; max-width: 220px; line-height: 1.5; }
+
+  /* camera placeholder */
+  .cam-placeholder {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px; color: var(--muted);
+  }
+  .cam-placeholder svg { opacity: 0.3; }
+  .cam-placeholder p { font-size: 0.85rem; }
+
+  /* bottom bar */
+  .camera-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    gap: 12px;
+  }
+
+  .ws-input-row {
+    display: flex; align-items: center; gap: 8px; flex: 1;
+  }
+  .ws-input-row label {
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    white-space: nowrap;
+  }
+  .ws-input-row input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.72rem;
+    padding: 7px 10px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .ws-input-row input:focus { border-color: var(--accent); }
+
+  .btn {
+    border: none; cursor: pointer;
+    border-radius: var(--radius);
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    font-size: 0.8rem;
+    padding: 9px 18px;
+    transition: all 0.18s;
+    letter-spacing: 0.04em;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #0a0d12;
+  }
+  .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-outline {
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+  }
+  .btn-outline:hover { background: rgba(255,71,87,0.1); }
+  .btn-outline:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* ── Side Panel ── */
+  .side-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel-section {
+    border-bottom: 1px solid var(--border);
+    padding: 18px 20px;
+  }
+  .panel-label {
+    font-size: 0.65rem;
+    font-family: 'Space Mono', monospace;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 12px;
+  }
+
+  /* Status chip */
+  .status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 14px;
+    border-radius: 99px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    background: var(--surface);
+    transition: all 0.3s;
+  }
+  .status-chip.no_object { color: var(--muted); }
+  .status-chip.positioning { color: var(--warn); border-color: var(--warn); background: rgba(255,184,0,0.08); }
+  .status-chip.success { color: var(--accent); border-color: var(--accent); background: rgba(0,229,160,0.08); }
+  .status-chip.idle { color: var(--muted); }
+
+  /* Guidance box */
+  .guidance-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    min-height: 70px;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    color: var(--text);
+    transition: border-color 0.3s;
+  }
+  .guidance-box.positioning { border-color: var(--warn); }
+  .guidance-box.success { border-color: var(--accent); }
+
+  /* Instruction badge */
+  .instruction-badge {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+    min-height: 38px;
+  }
+  .instruction-badge .instr-arrow { font-size: 1.2rem; }
+
+  /* Result card */
+  .result-section {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 20px;
+  }
+  .result-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: none;
+  }
+  .result-card.show { display: block; animation: slideUp 0.4s ease; }
+  .result-card-header {
+    background: rgba(0,229,160,0.1);
+    border-bottom: 1px solid rgba(0,229,160,0.2);
+    padding: 12px 16px;
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 600; font-size: 0.85rem;
+    color: var(--accent);
+  }
+  .result-row {
+    display: flex; flex-direction: column;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    gap: 3px;
+  }
+  .result-row:last-child { border-bottom: none; }
+  .result-key {
+    font-size: 0.62rem;
+    font-family: 'Space Mono', monospace;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .result-val {
+    font-size: 0.85rem;
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .result-val.empty { color: var(--muted); font-style: italic; }
+
+  /* raw log */
+  .log-section {
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .log-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.65rem;
+    font-family: 'Space Mono', monospace;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .log-toggle:hover { color: var(--text); }
+  .log-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+  }
+  .log-body.open { max-height: 180px; }
+  .log-inner {
+    padding: 0 20px 12px;
+    max-height: 168px;
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .log-entry {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.66rem;
+    color: var(--muted);
+    border-left: 2px solid var(--border);
+    padding-left: 8px;
+    line-height: 1.5;
+  }
+  .log-entry.in  { border-color: var(--accent); color: #c8ffe8; }
+  .log-entry.out { border-color: #5555ff; color: #c8c8ff; }
+  .log-entry.err { border-color: var(--danger); color: #ffc8c8; }
+  .log-entry.sys { border-color: var(--warn); color: #fff0c0; }
+
+  /* ── Animations ── */
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+  @keyframes sweep { from { top: 0%; } to { top: 100%; } }
+  @keyframes popIn { from { transform: scale(0.8); opacity:0; } to { transform: scale(1); opacity:1; } }
+  @keyframes slideUp { from { transform: translateY(16px); opacity:0; } to { transform: translateY(0); opacity:1; } }
+  @keyframes successPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(0,229,160,0.5); }
+    70%  { box-shadow: 0 0 0 12px rgba(0,229,160,0); }
+    100% { box-shadow: 0 0 0 0 rgba(0,229,160,0); }
+  }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Med<span>Scan</span></div>
+  <div class="ws-badge">
+    <div class="ws-dot" id="wsDot"></div>
+    <span id="wsStatus">disconnected</span>
+  </div>
+</header>
+
+<main>
+  <!-- ── Camera Panel ── -->
+  <div class="camera-panel">
+    <div class="video-wrap" id="videoWrap">
+      <div class="cam-placeholder" id="camPlaceholder">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+        <p>Camera not started</p>
+      </div>
+      <video id="video" autoplay playsinline muted style="display:none;"></video>
+      <canvas id="canvas" style="display:none;"></canvas>
+      <div class="scanline"></div>
+      <div class="bracket tl" id="bTL"></div>
+      <div class="bracket tr" id="bTR"></div>
+      <div class="bracket bl" id="bBL"></div>
+      <div class="bracket br" id="bBR"></div>
+      <div class="sweep" id="sweep"></div>
+      <div class="arrow-overlay">
+        <div class="arrow-bubble" id="arrowBubble"></div>
+      </div>
+      <div class="empty-overlay" id="emptyOverlay">
+        <div class="empty-icon">💊</div>
+        <p class="empty-text">No medication bottle detected. Please bring one into frame.</p>
+      </div>
+    </div>
+
+    <div class="camera-controls">
+      <div class="ws-input-row">
+        <label>URL:</label>
+        <input type="text" id="wsUrl" value="http://localhost:8080" placeholder="http://localhost:8080" />
+      </div>
+      <button class="btn btn-primary" id="btnStart" onclick="startScanning()">Start Camera</button>
+      <button class="btn btn-outline" id="btnStop" onclick="stopScanning()" disabled>Stop</button>
+    </div>
+  </div>
+
+  <!-- ── Side Panel ── -->
+  <div class="side-panel">
+    <div class="panel-section">
+      <div class="panel-label">Status</div>
+      <div class="status-chip idle" id="statusChip">
+        <span id="statusDot">○</span>
+        <span id="statusText">Idle</span>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="panel-label">Guidance</div>
+      <div class="guidance-box" id="guidanceBox">
+        Start the camera and connect to your server to begin scanning.
+      </div>
+      <div class="instruction-badge" id="instrBadge">
+        <span class="instr-arrow" id="instrArrow">—</span>
+        <span id="instrText">No instruction</span>
+      </div>
+    </div>
+
+    <div class="result-section">
+      <div class="panel-label">Extracted Data</div>
+      <div class="result-card" id="resultCard">
+        <div class="result-card-header">
+          ✓ Medication Label Read
+        </div>
+        <div id="resultRows"></div>
+      </div>
+      <p id="resultEmpty" style="font-size:0.8rem; color:var(--muted); margin-top:4px;">
+        Result will appear once the label is read.
+      </p>
+    </div>
+
+    <div class="log-section">
+      <div class="log-toggle" onclick="toggleLog()">
+        <span>Raw Log</span>
+        <span id="logToggleIcon">▸</span>
+      </div>
+      <div class="log-body" id="logBody">
+        <div class="log-inner" id="logInner"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────
+  let socket = null;
+  let stream = null;
+  let frameInterval = null;
+  let isScanning = false;
+
+  const ARROW_MAP = {
+    move_up:      { emoji: '⬆️', label: 'Move Up' },
+    move_down:    { emoji: '⬇️', label: 'Move Down' },
+    move_left:    { emoji: '⬅️', label: 'Move Left' },
+    move_right:   { emoji: '➡️', label: 'Move Right' },
+    rotate_left:  { emoji: '↺',  label: 'Rotate Left' },
+    rotate_right: { emoji: '↻',  label: 'Rotate Right' },
+    flip:         { emoji: '🔄', label: 'Flip Bottle' },
+    move_closer:  { emoji: '🔍', label: 'Move Closer' },
+    move_farther: { emoji: '🔭', label: 'Move Farther' },
+    hold_still:   { emoji: '✋', label: 'Hold Still' },
+    none:         null,
+  };
+
+  // ── Start / Stop ───────────────────────────────────────────────────────
+  async function startScanning() {
+    const wsUrl = document.getElementById('wsUrl').value.trim();
+
+    // 1. Start camera
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      const video = document.getElementById('video');
+      video.srcObject = stream;
+      video.style.display = 'block';
+      document.getElementById('camPlaceholder').style.display = 'none';
+    } catch (e) {
+      addLog('err', `Camera error: ${e.message}`);
+      return;
+    }
+
+    // 2. Connect Socket.IO
+    setWsStatus('connecting');
+    addLog('sys', `Connecting to ${wsUrl}…`);
+    socket = io(wsUrl, { transports: ['websocket'] });
+
+    socket.on('connect', () => {
+      setWsStatus('connected');
+      addLog('sys', 'Connected to server');
+      isScanning = true;
+      document.getElementById('sweep').classList.add('active');
+      startFrameCapture();
+    });
+
+    socket.on('response', (data) => {
+    console.log(data)
+      addLog('in', JSON.stringify(data));
+      handleResponse(data);
+    });
+
+
+ 
+
+    socket.on('disconnect', () => {
+      setWsStatus('disconnected');
+      addLog('sys', 'Connection closed');
+      stopFrameCapture();
+      document.getElementById('sweep').classList.remove('active');
+    });
+
+    socket.on('connect_error', (e) => {
+      setWsStatus('error');
+      addLog('err', `Connection error — is your server running? (${e.message})`);
+    });
+
+    document.getElementById('btnStart').disabled = true;
+    document.getElementById('btnStop').disabled = false;
+  }
+
+  function stopScanning() {
+    isScanning = false;
+    stopFrameCapture();
+    if (socket) { socket.disconnect(); socket = null; }
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    const video = document.getElementById('video');
+    video.style.display = 'none';
+    video.srcObject = null;
+    document.getElementById('camPlaceholder').style.display = 'flex';
+    document.getElementById('sweep').classList.remove('active');
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnStop').disabled = true;
+    setStatus('idle');
+    addLog('sys', 'Scanning stopped');
+  }
+
+  // ── Frame Capture ──────────────────────────────────────────────────────
+  function startFrameCapture() {
+    const video  = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx    = canvas.getContext('2d');
+
+    frameInterval = setInterval(() => {
+      if (!isScanning || !socket || !socket.connected) return;
+      if (!video.videoWidth) return;
+
+      canvas.width  = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+
+      const image = canvas.toDataURL('image/jpeg', 0.8);
+      canvas.toBlob( blob=>{
+        if(!blob) return;
+        blob.arrayBuffer().then( buf => {
+            socket.emit('frame' , {buf})
+            addLog('out', `Frame sent — ${Math.round(buf.byteLength/1024)}KB`);
+        })
+      })
+    //   socket.emit('frame', { image });
+    //   addLog('out', `Frame sent — ${Math.round(image.length * 0.75 / 1024)}KB`);
+    }, 600); // every 600ms — enough for testing
+  }
+
+  function stopFrameCapture() {
+    if (frameInterval) { clearInterval(frameInterval); frameInterval = null; }
+  }
+
+ 
+
+  // ── Handle Gemini Response 
+  function handleResponse(data) {
+    const { status, instructions, guidance_text, medication } = data;
+
+    // Guidance text
+    const box = document.getElementById('guidanceBox');
+    box.textContent = guidance_text || '—';
+    box.className = `guidance-box ${status || ''}`;
+
+    // Status chip
+    setStatus(status);
+
+    // Bracket colors
+    const brackets = ['bTL','bTR','bBL','bBR'].map(id => document.getElementById(id));
+    brackets.forEach(b => {
+      b.className = 'bracket ' + b.id.replace('b','').toLowerCase();
+      if (status === 'no_object') b.classList.add('warn');
+      else if (status === 'success') b.classList.add('success-color');
+    });
+
+    // Empty overlay
+    document.getElementById('emptyOverlay').classList.toggle('show', status === 'no_object');
+
+    // Instruction arrow - handle new instructions array
+    const instruction = Array.isArray(instructions) ? instructions[0] : instructions;
+    const arrow = ARROW_MAP[instruction] || null;
+    const arrowBubble = document.getElementById('arrowBubble');
+    const instrArrow  = document.getElementById('instrArrow');
+    const instrText   = document.getElementById('instrText');
+
+    if (arrow) {
+      arrowBubble.textContent = arrow.emoji;
+      arrowBubble.classList.add('show');
+      instrArrow.textContent = arrow.emoji;
+      instrText.textContent  = arrow.label;
+    } else {
+      arrowBubble.classList.remove('show');
+      instrArrow.textContent = '—';
+      instrText.textContent  = instruction === 'none' ? 'No instruction' : (instruction || '—');
+    }
+
+    // Success — show extracted medication
+    if (status === 'success' && medication) {
+      stopFrameCapture(); // stop sending frames
+      showResult(medication);
+    }
+  }
+
+  function setStatus(status) {
+    const chip = document.getElementById('statusChip');
+    const text = document.getElementById('statusText');
+    const dot  = document.getElementById('statusDot');
+    chip.className = `status-chip ${status || 'idle'}`;
+    const labels = { idle: 'Idle', no_object: 'No Object', positioning: 'Positioning…', success: 'Success ✓' };
+    const dots   = { idle: '○', no_object: '◌', positioning: '◉', success: '●' };
+    text.textContent = labels[status] || status || 'Idle';
+    dot.textContent  = dots[status]  || '○';
+  }
+
+  function showResult(med) {
+    const card = document.getElementById('resultCard');
+    const rows = document.getElementById('resultRows');
+    document.getElementById('resultEmpty').style.display = 'none';
+
+    const fields = [
+      ['Drug Name',     med.drug_name],
+      ['Dosage',        med.dosage],
+      ['Instructions',  med.instructions],
+      ['Quantity',      med.quantity],
+      ['Refills',       med.refills],
+      ['Prescriber',    med.prescriber],
+      ['Patient',       med.patient_name],
+      ['Pharmacy',      med.pharmacy],
+      ['Expiry',        med.expiry_date],
+      ['Full Label',    med.raw_label_text],
+    ];
+
+    rows.innerHTML = fields.map(([key, val]) => `
+      <div class="result-row">
+        <span class="result-key">${key}</span>
+        <span class="result-val ${val ? '' : 'empty'}">${val || 'Not found'}</span>
+      </div>
+    `).join('');
+
+    card.classList.add('show');
+    card.style.animation = 'successPulse 0.8s ease';
+  }
+
+  // ── WS Status ──────────────────────────────────────────────────────────
+  function setWsStatus(state) {
+    const dot  = document.getElementById('wsDot');
+    const text = document.getElementById('wsStatus');
+    dot.className = `ws-dot ${state}`;
+    text.textContent = state;
+  }
+
+  // ── Log ────────────────────────────────────────────────────────────────
+  let logOpen = false;
+  function toggleLog() {
+    logOpen = !logOpen;
+    document.getElementById('logBody').classList.toggle('open', logOpen);
+    document.getElementById('logToggleIcon').textContent = logOpen ? '▾' : '▸';
+  }
+
+  function addLog(type, msg) {
+    const inner = document.getElementById('logInner');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    const time = new Date().toLocaleTimeString('en', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    entry.textContent = `[${time}] ${msg}`;
+    inner.appendChild(entry);
+    inner.scrollTop = inner.scrollHeight;
+    // cap at 100 entries
+    while (inner.children.length > 100) inner.removeChild(inner.firstChild);
+  }
+
+  // ── Init ───────────────────────────────────────────────────────────────
+  addLog('sys', 'MedScan demo ready. Press "Start Camera" to begin.');
+
+  // Mock mode — simulate a server response for UI testing without a real backend
+  window.simulateResponse = function(status, instructions, guidance, medication) {
+    handleResponse({ status, instructions, guidance_text: guidance, medication });
+  };
+
+  // Quick mock test — open console and run:
+  // simulateResponse('positioning', 'rotate_right', 'Rotate the bottle slightly to the right so the label faces the camera.')
+  // simulateResponse('success', 'none', 'Label read successfully!', { drug_name: 'Lisinopril', dosage: '10mg', instructions: 'Take once daily', quantity: '30 tablets', refills: '2', prescriber: 'Dr. Smith', patient_name: 'Jane Doe', pharmacy: 'CVS Pharmacy', expiry_date: '2026-08', raw_label_text: 'LISINOPRIL 10MG TABLET...' })
+  
+  // Test with new schema structure
+  window.testNewSchema = function() {
+    // Test with single instruction
+    simulateResponse('positioning', 'rotate_right', 'Rotate the bottle slightly to the right so the label faces the camera.');
+    
+    // Test with array of instructions
+    setTimeout(() => {
+      simulateResponse('positioning', ['move_closer', 'hold_still'], 'Move closer and hold still for better capture.');
+    }, 2000);
+    
+    // Test success with medication
+    setTimeout(() => {
+      simulateResponse('success', 'none', 'Label read successfully!', { 
+        drug_name: 'Lisinopril', 
+        dosage: '10mg', 
+        instructions: 'Take once daily', 
+        quantity: '30 tablets', 
+        refills: '2', 
+        prescriber: 'Dr. Smith', 
+        patient_name: 'Jane Doe', 
+        pharmacy: 'CVS Pharmacy', 
+        expiry_date: '2026-08', 
+        raw_label_text: 'LISINOPRIL 10MG TABLET...' 
+      });
+    }, 4000);
+  };
+</script>
+</body>
+</html>

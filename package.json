@@ -1,0 +1,41 @@
+{
+  "name": "ntentan-api",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": ".src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node -r module-alias/register ./dist/index.js",
+    "build": "tsc -p ./tsconfig.json",
+    "dev": "nodemon",
+    "lint": "eslint 'src/**/*.ts'"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.3.0",
+    "nodemon": "^3.1.14",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@google/genai": "^1.43.0",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "module-alias": "^2.3.4",
+    "socket.io": "^4.8.3",
+    "ws": "^8.19.0"
+  },
+  "_moduleAliases": {
+    "@": "./dist",
+    "@features": "./dist/features",
+    "@config": "./dist/config",
+    "@lib": "./dist/lib",
+    "@middlewares": "./dist/middlewares",
+    "@types": "./dist/types",
+    "@utils": "./dist/utils"
+  }
+}
