@@ -84,9 +84,19 @@ export interface SearchDrugInfoInput {
   query?: string;
 }
 
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
+
+
+
+
+
+export type ContentType = "text" | "audio"
+
+export type SupportedLanguage = "english" | "twi";
+
+export interface UserMessage { 
+  content : string ;
+  type : ContentType , 
+  language : SupportedLanguage
 }
 
 export interface AssistantResponse {
@@ -96,8 +106,13 @@ export interface AssistantResponse {
 }
 
 
+export interface ChatMessage {
+  content : string  , 
+  type : ContentType , 
+  role : "user" | "assistant" , 
+  language : SupportedLanguage
+}
 
-export type SupportedLanguage = "english" | "twi";
 
 export interface VoiceRequest {
   userId: string;

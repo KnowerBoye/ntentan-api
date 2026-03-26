@@ -9,7 +9,8 @@ import {
   AssistantResponse,
   QueryPrescriptionsInput,
   SearchDrugInfoInput,
-} from "@features/assistant/types";
+  UserMessage as UserMessage,
+} from "@/types/assistant";
 
 
 function buildSystemPrompt(): string {
@@ -76,6 +77,7 @@ async function dispatchTool(
 
   if (call.name === "search_drug_info") {
     return {
+      //@ts-ignore
       result: await searchDrugInfo(args as SearchDrugInfoInput),
       isSearch: true,
     };
@@ -90,7 +92,7 @@ async function dispatchTool(
 
 export class MedicalAssistant {
   private ai: GoogleGenAI;
-  private readonly model = "gemini-2.0-flash";
+  private readonly model = "models/gemini-2.5-flash";
 
   constructor(apiKey: string) {
     this.ai = new GoogleGenAI({ apiKey });
@@ -104,7 +106,7 @@ export class MedicalAssistant {
    * @param history      Prior conversation turns
    */
   async chat(
-    userMessage: string,
+    userMessage: UserMessage,
     userId: string,
     history: ChatMessage[] = []
   ): Promise<AssistantResponse> {
@@ -113,25 +115,49 @@ export class MedicalAssistant {
 
   
     const contents: Content[] = [
-      ...history.map((m): Content => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }],
-      })),
-      {
-        role: "user",
-        parts: [{ text: userMessage }],
-      },
-    ];
+    ...history.map((m): Content => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts:  m.type == "audio" ? 
+      [
+        {
+          inlineData : {
+            mimeType : "audio/wav" , 
+            data : m.content
+          }
+        }
+      ] : [{
+        text : m.content
+      }]
+    })),
+    {
+      role: "user",
+      parts:
+        userMessage.type === "audio"
+          ? [
+              {
+                inlineData: {
+                  mimeType: "audio/wav", 
+                  data: userMessage.content, 
+                },
+              },
+            ]
+          : [
+              {
+                text: userMessage.content,
+              },
+            ],
+    },
+  ];
 
  
     while (true) {
       const response = await this.ai.models.generateContent({
         model: this.model,
-        systemInstruction: buildSystemPrompt(),
-        tools,
         config: {
           temperature: 0.2,
           maxOutputTokens: 1024,
+          systemInstruction: buildSystemPrompt(),
+          tools,
         },
         contents,
       });

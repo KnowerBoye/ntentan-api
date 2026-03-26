@@ -14,7 +14,7 @@ import {
   QueryPrescriptionsInput,
   PrescriptionQueryResult,
   ToolResult,
-} from "@features/assistant/types";
+} from "@/types/assistant";
 
 
 async function fetchAll(userId: string): Promise<Prescription[]> {

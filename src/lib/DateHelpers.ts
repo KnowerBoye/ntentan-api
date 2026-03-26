@@ -1,9 +1,6 @@
-// ─────────────────────────────────────────────
-//  lib/dateHelpers.ts
-//  Date utilities for prescription scheduling
-// ─────────────────────────────────────────────
+
 import { format, parseISO, addDays, subDays, isAfter, isBefore, isEqual } from "date-fns";
-import { Prescription, TIME_WINDOWS } from "@features/assistant/types";
+import { Prescription, TIME_WINDOWS } from "@/types/assistant";
 
 /** Today as YYYY-MM-DD */
 export function todayISO(): string {

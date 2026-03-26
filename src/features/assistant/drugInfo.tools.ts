@@ -1,6 +1,6 @@
 
 import axios from "axios";
-import { DrugInfo, ToolResult, SearchDrugInfoInput } from "@features/assistant/types";
+import { DrugInfo, ToolResult, SearchDrugInfoInput } from "@/types/assistant";
 
 const OPENFDA_BASE = "https://api.fda.gov/drug";
 

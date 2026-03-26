@@ -3,6 +3,7 @@ import dotenv from "dotenv"
 import {Server} from "socket.io"
 import {createServer} from "http"
 import {handleVideoStreamConnection} from "@features/medication-scanner/medscanner.service"
+import { handleAssistantSocket } from "./features/assistant/assistant.service"
 
 dotenv.config()
 
@@ -13,6 +14,8 @@ const server = createServer(app)
 const io = new Server(server)
 
 
+
+io.of("/assistant").on("connection" , handleAssistantSocket)
 io.of("/med-scanner").on("connection" , handleVideoStreamConnection)
 
 
