@@ -35,8 +35,9 @@ jobs:
           docker push "$IMAGE"
 
       - name: Deploy to Cloud Run
+        env: 
+            IMAGE: us-east4-docker.pkg.dev/deepmive/ntentan/api:${{ github.sha }}
         run: |
-
 
           set -euo pipefail
 
@@ -54,7 +55,7 @@ jobs:
           SERVICE_ACCOUNT="ntentant@deepmive.iam.gserviceaccount.com"
 
           gcloud run deploy ntentan-api \
-            --image=us-east4-docker.pkg.dev/deepmive/ntentan \
+            --image="$IMAGE" \
             --region=us-east4 \
             --platform=managed \
             --allow-unauthenticated \
