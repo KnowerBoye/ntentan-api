@@ -61,7 +61,7 @@ jobs:
             --allow-unauthenticated \
             --update-env-vars="$ENV_VARS" \
             --service-account="$SERVICE_ACCOUNT" \
-            --set-secrets="GOOGLE_JSON=google-json:latest"
+
           
            gcloud run services describe ntentan-api --project=deepmive --region=us-east4 --format=values(status.url)
 
