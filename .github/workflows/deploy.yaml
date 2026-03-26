@@ -28,8 +28,9 @@ jobs:
         run: gcloud auth configure-docker us-east4-docker.pkg.dev --quiet
 
       - name: Build & Push Image
+        env:
+            IMAGE: us-east4-docker.pkg.dev/deepmive/ntentan:${{ github.sha }}
         run: |
-          IMAGE=us-east4-docker.pkg.dev/deepmive/ntentan:${{ github.sha }}
           docker build -t $IMAGE .
           docker push $IMAGE
 
