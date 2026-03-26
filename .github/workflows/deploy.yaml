@@ -29,7 +29,7 @@ jobs:
 
       - name: Build & Push Image
         run: |
-          IMAGE=us-east4-docker.pkg.dev/deepmive/ntentan
+          IMAGE=us-east4-docker.pkg.dev/deepmive/ntentan:${{ github.sha }}
           docker build -t $IMAGE .
           docker push $IMAGE
 
@@ -51,7 +51,7 @@ jobs:
           fi
 
           SERVICE_ACCOUNT="ntentant@deepmive.iam.gserviceaccount.com"
-          
+
           gcloud run deploy ntentan-api \
             --image=us-east4-docker.pkg.dev/deepmive/ntentan \
             --region=us-east4 \
