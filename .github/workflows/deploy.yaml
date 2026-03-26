@@ -29,7 +29,7 @@ jobs:
 
       - name: Build & Push Image
         env:
-            IMAGE: us-east4-docker.pkg.dev/deepmive/ntentan:${{ github.sha }}
+            IMAGE: us-east4-docker.pkg.dev/deepmive/ntentan/api:${{ github.sha }}
         run: |
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
