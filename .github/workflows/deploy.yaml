@@ -60,7 +60,7 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --update-env-vars="$ENV_VARS" \
-            --service-account="$SERVICE_ACCOUNT" 
+            --service-account="$SERVICE_ACCOUNT" \
             --timeout=900s \
 
           

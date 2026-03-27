@@ -86,7 +86,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export function handleVideoStreamConnection(clientWs :Socket){
 
-  console.log("client connected")
+
 // per connection state
     let frameBuffer : string[]  = [];   
     let isInferring   = false; // inference gate: true while model is working

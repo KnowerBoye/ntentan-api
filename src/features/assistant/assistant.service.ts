@@ -36,7 +36,7 @@ export async function handleAssistantSocket(clientWs : Socket){
     clientWs.on("message" , async (message : UserMessage) =>{
 
 
-        console.log(message)
+  
         try{
 
             const query : UserMessage = {
@@ -79,6 +79,9 @@ export async function handleAssistantSocket(clientWs : Socket){
             const response = await assistant.chat(query , "uid" ,  history)
 
             console.log(response)
+
+            clientWs.emit("response" , response)
+            
             history.push({
                 content : response.message , 
                 role : "assistant" , 
