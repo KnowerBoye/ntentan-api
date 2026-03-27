@@ -35,7 +35,6 @@ export async function handleAssistantSocket(clientWs : Socket){
 
     clientWs.on("message" , async (message : UserMessage) =>{
 
-
   
         try{
 
@@ -45,10 +44,7 @@ export async function handleAssistantSocket(clientWs : Socket){
                 language : message.language
             }
     
-            history.push({
-                ...message , 
-                role : "user" , 
-            })
+            
 
             if(message.type == "audio"){
     
@@ -68,6 +64,7 @@ export async function handleAssistantSocket(clientWs : Socket){
             else { 
     
                 if(message.language == "twi") query.content = await twiToEnglish(message.content)
+                
                 else query.content = message.content
     
                 query.type = "text" 
@@ -76,18 +73,24 @@ export async function handleAssistantSocket(clientWs : Socket){
     
            
             console.log(query)
+            
             const response = await assistant.chat(query , "uid" ,  history)
 
-            console.log(response)
 
-            clientWs.emit("response" , response)
-            
+            history.push({
+                ...query , 
+                role : "user" , 
+            })
+
             history.push({
                 content : response.message , 
                 role : "assistant" , 
                 language : "english" , 
                 type : "text"
             })
+
+            clientWs.emit("response" , response)
+
 
         }catch(e){
             clientWs.emit("error" , "An unexpected server error occured")

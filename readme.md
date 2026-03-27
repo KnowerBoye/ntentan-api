@@ -103,49 +103,53 @@ void setupScanner() {
 
 
 
-##  Medical Assistant (WebSocket)
+This section covers the `assistant` WebSocket service, which manages multi-modal medical consultations. It features specialized handling for **Twi** translation and transcription to ensure accessible healthcare guidance.
 
-The `assistant` endpoint provides a persistent session for medical inquiries. It maintains a short-term conversation history and can process both standard English text/audio and Twi language inputs by translating them before clinical analysis.
+---
+
+## 🤖 Medical Assistant (WebSocket)
+
+The `assistant` endpoint provides a persistent session for medical inquiries. It maintains a conversation history in memory and processes both text and audio inputs.
 
 ### **Endpoint**
 `WS /assistant`
 
 ### **Workflow**
-1.  **Connection**: Upon connecting, a unique session history is initialized in memory.
-2.  **Processing**: 
-    * **Text/English**: Passed directly to the Medical Assistant.
-    * **Text/Twi**: Translated to English text first.
-    * **Audio/Twi**: Transcribed and translated to English text via specialized voice services.
-    * **Audio/English**: Sent as raw audio data for multimodal processing.
-3.  **Response**: The Gemini-powered `MedicalAssistant` generates a response which is then added to the session history.
+1.  **Connection**: A unique session history is initialized for the user.
+2.  **Multimodal Processing**: 
+    * **English Text/Audio**: Passed to the Medical Assistant.
+    * **Twi Text**: Translated to English before processing.
+    * **Twi Audio**: Transcribed and translated to English text via a voice service.
+3.  **Persistence**: Every exchange is pushed to a `history` array to maintain context for the AI.
 
 ---
 
 ### **Request Payload**
-The client emits a `message` event with a `UserMessage` object.
+The client emits a `message` event. **Note:** Audio content must be sent as a **Base64 encoded string**.
 
 **Event Name:** `message`
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `type` | `string` | `"text"` or `"audio"` |
-| `content` | `string \| Buffer` | The message string or raw audio buffer |
+| `content` | `string` | The message text or **Base64 encoded** audio string |
 | `language` | `string` | `"english"` or `"twi"` |
 
 ---
 
 ### **Response Schema**
-The server currently processes the message and updates the internal history. (Note: Ensure your client listens for the `assistant_response` event, usually emitted by the `assistant.chat` logic).
+The server emits a `response` event containing the assistant's clinical feedback.
 
-#### **Error Handling**
-If a server-side error occurs, the server emits:
-**Event Name:** `error`
-**Data:** `"An unexpected server error occured"`
-*Note: On error, the socket is disconnected and the session history is cleared.*
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `role` | `string` | Always `"assistant"` |
+| `content` | `string` | The plain text response from the AI |
+| `type` | `string` | `"text"` |
+| `language` | `string` | `"english"` |
 
 ---
 
-### **Implementation Examples**
+### **Corrected Implementation Examples**
 
 #### **JavaScript (Socket.io-client)**
 ```javascript
@@ -153,54 +157,53 @@ import { io } from "socket.io-client";
 
 const socket = io("YOUR_SERVER_URL/assistant");
 
-// Sending a Twi Voice Note
-function sendTwiAudio(audioBuffer) {
+// Example: Sending Twi Audio as Base64
+function sendTwiAudio(base64String) {
   socket.emit("message", {
     type: "audio",
     language: "twi",
-    content: audioBuffer // Buffer from recorder
+    content: base64String 
   });
 }
 
-// Sending English Text
-function sendEnglishText(text) {
-  socket.emit("message", {
-    type: "text",
-    language: "english",
-    content: text
-  });
-}
+// Receiving the AI response
+socket.on("response", (data) => {
+  // data = { role: "assistant", content: "...", ... }
+  console.log("Assistant:", data.content);
+});
 
-socket.on("error", (msg) => console.error(msg));
+socket.on("error", (msg) => console.error("Server Error:", msg));
 ```
 
 #### **Dart (socket_io_client)**
 ```dart
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'dart:convert';
 
 void setupAssistant() {
   IO.Socket socket = IO.io('YOUR_SERVER_URL/assistant', 
     IO.OptionBuilder().setTransports(['websocket']).build()
   );
 
-  // Sending English Text
-  void sendMessage(String text) {
+  // Sending Audio (must be Base64 encoded)
+  void sendAudio(List<int> bytes) {
+    String base64Audio = base64Encode(bytes);
     socket.emit('message', {
-      'type': 'text',
-      'content': text,
+      'type': 'audio',
+      'content': base64Audio,
       'language': 'english'
     });
   }
 
-    //recieve response
-    socket.on('response', (data) {
-    // Data is a JSON string from the server
-    print('Server says: $data');
+  // Receiving response
+  socket.on('response', (data) {
+    // Data is the JSON object containing the assistant's reply
+    print('Assistant says: ${data['content']}');
   });
 
-  // Listening for errors
   socket.on('error', (data) => print('Error: $data'));
 }
 ```
 
 ---
+
