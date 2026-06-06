@@ -1,8 +1,23 @@
-import{ GoogleGenAI, Modality } from "@google/genai";
+import { ContentEmbedding, GoogleGenAI, Modality, Type } from "@google/genai";
 import dotenv from "dotenv"
 import { Socket } from "socket.io";
 
+import { FieldValue } from "@google-cloud/firestore";
+import { Medication, MedicationLabelFields, emitMedScannerResponse } from "@/types/medscanner";
+import { getFirestore } from "@/lib/firebase";
+import { logger } from "@/lib/logger";
+import { ExternalServiceError } from "@/lib/errors";
+import { emitSocketError } from "@/lib/socket-error-handler";
+
 dotenv.config()
+
+
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID;
+const LOCATION = process.env.VERTEX_LOCATION ?? "us-central1";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GOOGLE_APPLICATION_CREDENTIALS = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+
+
 
 const SYSTEM_PROMPT = `
 You are a medication label reading assistant. Your job is to guide the user 
@@ -80,7 +95,27 @@ const BUFFER_MAX_FRAMES = 5;       // max frames to accumulate before forcing a 
 const BUFFER_FLUSH_INTERVAL_MS = 800; // flush every N ms even if buffer isn't full
 
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const ai = new GoogleGenAI({ 
+  // vertexai: true,
+  // project: PROJECT_ID,
+  // location: LOCATION,
+   apiKey : GEMINI_API_KEY,
+
+});
+
+const embeddingAi = new GoogleGenAI({
+  vertexai: true,
+  project: PROJECT_ID,
+  location: LOCATION,
+  googleAuthOptions : {
+    keyFilename : GOOGLE_APPLICATION_CREDENTIALS
+  }
+
+})
+
+
+
+  const firestore = getFirestore();
 
 
 
@@ -110,9 +145,9 @@ export function handleVideoStreamConnection(clientWs :Socket){
     isInferring = true;
 
 
-    // Notify client that processing has started (optional but useful for UX)
+    // Notify client that processing has started
     if (clientWs.connected) {
-        clientWs.emit("response" , JSON.stringify({ status: "processing" }));
+        emitMedScannerResponse(clientWs, { status: "processing" });
     }
 
     try {
@@ -146,17 +181,67 @@ export function handleVideoStreamConnection(clientWs :Socket){
         .filter(Boolean)
         .join("");
 
-        console.log(text);
+        let result = JSON.parse(text)
 
-        if (clientWs.connected) {
-        clientWs.emit("response" , text);
+        if(result.status === "success"){
+
+          const {drug_name , raw_label_text} = result.medication
+
+          const medicationFields = await extractMedicationFields({drug_name , raw_label_text})
+
+          if (!clientWs.user?.uid) {
+            logger.error("Med-scanner: user not authenticated on socket", {
+              socketId: clientWs.id,
+            });
+            emitSocketError(
+              clientWs,
+              new ExternalServiceError("Authentication", "User not authenticated"),
+              "error"
+            );
+            return;
+          }
+
+          const match = await findBestMatch(clientWs.user.uid, medicationFields)
+
+          const successResponse = {
+            status: "success" as const,
+            instruction: "none" as const,
+            guidance_text: result.guidance_text,
+            prescription_match: match,
+          };
+
+          if (clientWs.connected) {
+            emitMedScannerResponse(clientWs, successResponse);
+          }
+        } else {
+          // positioning / no_object — forward from Gemini as-is
+          if (clientWs.connected) {
+            emitMedScannerResponse(clientWs, {
+              status: result.status,
+              instruction: result.instruction,
+              guidance_text: result.guidance_text,
+            });
+          }
         }
     } catch (err) {
-        // log with sentry
+        const error = err instanceof Error ? err : new Error(String(err));
 
-        // decide based on demo wether to actually disconnet or just continute next buffer 
-        clientWs.disconnect()
-        console.error("Gemini error:", err);
+        logger.error("Gemini error in med-scanner", {
+          socketId: clientWs.id,
+          message: error.message,
+          stack: error.stack,
+        });
+
+        emitSocketError(
+          clientWs,
+          new ExternalServiceError("Gemini API", error.message),
+          "error"
+        );
+
+        // decide based on demo whether to actually disconnect or just continue next buffer
+        if (clientWs.connected) {
+          clientWs.disconnect(true);
+        }
     } finally {
         // release gate for next flush
         isInferring = false;
@@ -199,3 +284,247 @@ export function handleVideoStreamConnection(clientWs :Socket){
 
 
 }
+
+
+/**
+ * Extracts structured medication fields from raw OCR scan data.
+ *
+ * @param {Object} ocrResult - The success payload from your OCR model
+ * @param {string} ocrResult.drug_name - The drug name parsed by OCR
+ * @param {string[]} ocrResult.raw_label_text - Raw tokens from the label
+ * @returns {Promise<Object>} MedicationFields
+ */
+export async function extractMedicationFields(ocrResult : {drug_name : string , raw_label_text : string[]}) : Promise<MedicationLabelFields> {
+  const { drug_name, raw_label_text } = ocrResult;
+
+  const labelContext = [
+    `Parsed drug name: ${drug_name}`,
+    `Raw label tokens: ${raw_label_text.join(", ")}`,
+  ].join("\n");
+
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash", 
+    contents: [
+      `You are a pharmacology assistant helping to structure medication label data for a prescription lookup system.
+
+Extract structured fields from the following OCR scan of a medication label.
+
+${labelContext}
+
+Notes:
+- The label may be for a non-prescription product (e.g. a topical repellent) — extract what you can.
+- Return null for fields you cannot determine with reasonable confidence.
+- The confidence score should reflect how reliably this label maps to a medication record.`,
+    ],
+    config: {
+      // Enforce JSON output matching our exact schema
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          brand_name: {
+            type: Type.STRING,
+            nullable: true,
+            description: "The commercial or brand name of the product (e.g. 'Medisoft', 'Panadol')",
+          },
+          generic_name: {
+            type: Type.STRING,
+            nullable: true,
+            description: "The active ingredient or INN generic name (e.g. 'Paracetamol', 'DEET'). For combination products, list the primary active ingredient.",
+          },
+          manufacturer: {
+            type: Type.STRING,
+            nullable: true,
+            description: "The name of the manufacturing company or brand owner",
+          },
+          dosage_form: {
+            type: Type.STRING,
+            nullable: true,
+            description: "Physical form of the product: tablet, capsule, cream, spray, liquid, etc.",
+          },
+          concentration: {
+            type: Type.STRING,
+            nullable: true,
+            description: "Strength, concentration, or net quantity (e.g. '500mg', '5%', '100ml')",
+          },
+          product_category: {
+            type: Type.STRING,
+            nullable: true,
+            description: "High-level therapeutic or product category (e.g. 'analgesic', 'topical repellent', 'antibiotic')",
+          },
+          confidence: {
+            type: Type.NUMBER,
+            description: "Confidence score for the overall extraction (0 = very uncertain, 1 = highly confident)",
+          },
+          unmatched_tokens: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "Label tokens that could not be mapped to any known field",
+          },
+        },
+        required: [
+          "brand_name",
+          "generic_name",
+          "manufacturer",
+          "dosage_form",
+          "concentration",
+          "product_category",
+          "confidence",
+          "unmatched_tokens",
+        ],
+      },
+    },
+  });
+
+  // The SDK guarantees the text returned matches your schema type definition
+  if (!response.text) {
+    throw new ExternalServiceError("Gemini API", "Model failed to yield a response body.");
+  }
+
+  return JSON.parse(response.text);
+}
+
+
+
+
+
+
+const EMBEDDING_MODEL = "text-embedding-005";
+const EMBEDDING_FIELD = "name_embedding"; 
+const TOP_N = 5;
+
+// Distance threshold — Firestore uses DOT_PRODUCT by default with
+// text-embedding-004 (normalised vectors), so distance is in [0, 1].
+// Below this value = good match; above = likely unrelated.
+const DISTANCE_THRESHOLD = 0.3;
+
+
+
+/**
+ * @param {string} text
+ * @returns {Promise<number[]>}
+ */
+export async function embedText(text : string) : Promise<number[]> {
+  const response = await embeddingAi.models.embedContent({
+    model: EMBEDDING_MODEL,
+    contents: [{ text }]
+  })
+
+ 
+  if (response.embeddings?.[0]?.values) {
+    return response.embeddings[0].values;
+  }
+
+  throw new ExternalServiceError("Embedding API", "Failed to extract valid embedding values array from response.");
+}
+
+
+
+/**
+ * @param {Object} fields
+ * @returns {string}
+ */
+function buildQueryString(fields : MedicationLabelFields) : string {
+  return [
+    fields.brand_name,
+    fields.generic_name,
+    fields.concentration,
+    fields.product_category,
+    fields.dosage_form,
+  ]
+    .filter(Boolean)           
+    .join(" ")
+    .trim();
+}
+
+
+/**
+ * Search a user's medication subcollection using vector similarity.
+ *
+ * @param {string} userId
+ * @param {MedicationLabelFields} extractedFields
+ * @returns {Promise<SearchResult[]>}
+ *
+ * @typedef {Object} SearchResult
+ * @property {string}  id           - Firestore document ID
+ * @property {string}  name         - Medication name from DB
+ * @property {string}  dosage       - Dosage from DB
+ * @property {number}  distance     - Vector distance (lower = more similar)
+ * @property {boolean} withinThreshold - Whether this is a confident match
+ */
+export async function searchUserMedications(userId : string, extractedFields : MedicationLabelFields) : Promise<{
+  medication : Medication;
+  distance: number;
+  withinThreshold: boolean;
+}[]> {
+
+
+  const queryString = buildQueryString(extractedFields);
+
+
+
+  // console.log(`[search] Query string: "${queryString}"`);
+
+
+  const queryVector = await embedText(queryString);
+
+      // console.log("vector" , queryVector)
+
+
+  const medicationsRef = firestore
+    .collection("users")
+    .doc(userId)
+    .collection("medications");
+
+  const vectorQuery = medicationsRef.findNearest({
+    vectorField: EMBEDDING_FIELD,
+    //@ts-ignore
+    //temp ignore to debug
+    queryVector: FieldValue.vector(queryVector),
+    limit: TOP_N,
+    distanceMeasure: "COSINE",
+    distanceResultField: "vector_distance", 
+  });
+
+  const snapshot = await vectorQuery.get();
+
+  if (snapshot.empty) return []
+
+  const results = snapshot.docs.map((doc) => {
+    const data = doc.data();
+    const distance = data.vector_distance ?? null;
+
+    return {
+      medication: { ...doc.data() } as Medication,
+      distance,
+      withinThreshold:
+        distance !== null ? distance <= DISTANCE_THRESHOLD : false,
+    };
+  });
+
+  // Sort ascending by distance (closest first)
+  results.sort((a, b) => a.distance - b.distance);
+
+  return results;
+}
+
+
+/**
+ * Returns the single best matching medication, or null if no confident match.
+ *
+ * @param {string} userId
+ * @param {MedicationLabelFields} extractedFields
+ * @returns {Promise<SearchResult|null>}
+ */
+export async function findBestMatch(userId : string, extractedFields : MedicationLabelFields) {
+  const results = await searchUserMedications(userId, extractedFields);
+  const best = results[0] ?? null;
+
+  if (!best || !best.withinThreshold) {
+    console.log("[search] No confident match found.");
+    return null;
+  }
+
+  return best;
+}
+
