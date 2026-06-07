@@ -10,7 +10,8 @@
 "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand",
     "build": "tsc -p ./tsconfig.json",
     "dev": "nodemon",
-    "lint": "eslint 'src/**/*.ts'"
+    "lint": "eslint 'src/**/*.ts'",
+    "start": "node dist/index.js"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
