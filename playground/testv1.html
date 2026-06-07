@@ -6,6 +6,8 @@
 <title>MedScan — Bottle Scanner Demo</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <style>
   :root {
     --bg:       #0a0d12;
@@ -36,11 +38,18 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 18px 28px;
+    padding: 14px 28px;
     border-bottom: 1px solid var(--border);
     position: sticky; top: 0; z-index: 10;
     background: rgba(10,13,18,0.92);
     backdrop-filter: blur(12px);
+    gap: 12px;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 20px;
   }
 
   .logo {
@@ -70,6 +79,83 @@
   .ws-dot.connected   { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
   .ws-dot.connecting  { background: var(--warn);   animation: pulse 1s infinite; }
   .ws-dot.error       { background: var(--danger); }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  /* ── User / Auth ── */
+  .user-info {
+    display: none;
+    align-items: center;
+    gap: 10px;
+  }
+  .user-info.visible { display: flex; }
+  .user-avatar {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    object-fit: cover;
+  }
+  .user-name {
+    font-size: 0.78rem;
+    color: var(--text);
+    font-weight: 600;
+  }
+  .btn-signout {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    padding: 5px 10px;
+    border-radius: 6px;
+    transition: all 0.18s;
+  }
+  .btn-signout:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+
+  .btn-google {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #fff;
+    color: #333;
+    border: none;
+    border-radius: 99px;
+    padding: 8px 18px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.18s;
+    white-space: nowrap;
+  }
+  .btn-google:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255,255,255,0.15);
+  }
+  .btn-google img {
+    width: 18px; height: 18px;
+  }
+  .btn-google.hidden { display: none; }
+
+  .auth-guard {
+    display: none;
+    padding: 12px 20px;
+    background: rgba(255,71,87,0.08);
+    border-bottom: 1px solid rgba(255,71,87,0.2);
+    font-size: 0.8rem;
+    color: var(--danger);
+    align-items: center;
+    gap: 8px;
+  }
+  .auth-guard.visible { display: flex; }
 
   /* ── Layout ── */
   main {
@@ -431,12 +517,29 @@
 <body>
 
 <header>
-  <div class="logo">Med<span>Scan</span></div>
-  <div class="ws-badge">
-    <div class="ws-dot" id="wsDot"></div>
-    <span id="wsStatus">disconnected</span>
+  <div class="header-left">
+    <div class="logo">Med<span>Scan</span></div>
+    <div class="ws-badge">
+      <div class="ws-dot" id="wsDot"></div>
+      <span id="wsStatus">disconnected</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="user-info" id="userInfo">
+      <img class="user-avatar" id="userAvatar" src="" alt="" />
+      <span class="user-name" id="userName"></span>
+      <button class="btn-signout" onclick="signOut()">Sign Out</button>
+    </div>
+    <button class="btn-google" id="btnGoogleSignIn" onclick="googleSignIn()">
+      <img src="https://fonts.gstatic.com/s/i/productlogos/googleg/v6/24px.svg" alt="" />
+      Sign in with Google
+    </button>
   </div>
 </header>
+
+<div class="auth-guard" id="authGuard">
+  ⚠ Please sign in with Google before starting the scanner.
+</div>
 
 <main>
   <!-- ── Camera Panel ── -->
@@ -523,11 +626,29 @@
 </main>
 
 <script>
+  // ═══════════════════════════════════════════════════════════════
+  //  Firebase Configuration & Initialisation
+  // ═══════════════════════════════════════════════════════════════
+  const firebaseConfig = {
+    apiKey: "AIzaSyBPG8uzLpXzECS3Ee5YswJsoi7-sYts1Ww",
+    authDomain: "ntentan-8c851.firebaseapp.com",
+    projectId: "ntentan-8c851",
+    storageBucket: "ntentan-8c851.firebasestorage.app",
+    messagingSenderId: "245419782670",
+    appId: "1:245419782670:web:2f574b8586421c111d425f"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const googleProvider = new firebase.auth.GoogleAuthProvider();
+
   // ── State ──────────────────────────────────────────────────────────────
   let socket = null;
   let stream = null;
   let frameInterval = null;
   let isScanning = false;
+  let currentUser = null;
+  let idToken = null;
 
   const ARROW_MAP = {
     move_up:      { emoji: '⬆️', label: 'Move Up' },
@@ -543,8 +664,94 @@
     none:         null,
   };
 
-  // ── Start / Stop ───────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════
+  //  Firebase Auth — Google Sign-In
+  // ═══════════════════════════════════════════════════════════════
+
+  async function googleSignIn() {
+    try {
+      const result = await auth.signInWithPopup(googleProvider);
+      handleAuthResult(result.user);
+    } catch (err) {
+      // If the user closes the popup, that's not really an error to show
+      if (err.code !== 'auth/popup-closed-by-user') {
+        addLog('err', `Sign-in error: ${err.message}`);
+      }
+    }
+  }
+
+  async function signOut() {
+    try {
+      await auth.signOut();
+      currentUser = null;
+      idToken = null;
+      updateUIForAuth(false);
+      addLog('sys', 'Signed out');
+      // Disconnect if scanning
+      if (socket) {
+        stopScanning();
+      }
+    } catch (err) {
+      addLog('err', `Sign-out error: ${err.message}`);
+    }
+  }
+
+  function handleAuthResult(user) {
+    if (user) {
+      currentUser = user;
+      updateUIForAuth(true);
+      addLog('sys', `Authenticated as ${user.email || user.uid}`);
+      // Get the Firebase ID token for WebSocket auth
+      user.getIdToken().then(token => {
+        idToken = token;
+        addLog('sys', 'Firebase ID token acquired');
+      }).catch(err => {
+        addLog('err', `Failed to get ID token: ${err.message}`);
+      });
+    }
+  }
+
+  function updateUIForAuth(signedIn) {
+    const btnGoogle = document.getElementById('btnGoogleSignIn');
+    const userInfo = document.getElementById('userInfo');
+    const authGuard = document.getElementById('authGuard');
+
+    if (signedIn && currentUser) {
+      btnGoogle.classList.add('hidden');
+      userInfo.classList.add('visible');
+      document.getElementById('userAvatar').src = currentUser.photoURL || '';
+      document.getElementById('userName').textContent = currentUser.displayName || currentUser.email || currentUser.uid;
+      authGuard.classList.remove('visible');
+    } else {
+      btnGoogle.classList.remove('hidden');
+      userInfo.classList.remove('visible');
+      authGuard.classList.add('visible');
+    }
+  }
+
+  // Listen for auth state changes (restores session on page reload)
+  auth.onAuthStateChanged(user => {
+    if (user) {
+      handleAuthResult(user);
+    } else {
+      currentUser = null;
+      idToken = null;
+      updateUIForAuth(false);
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  //  Start / Stop — now requires auth
+  // ═══════════════════════════════════════════════════════════════
+
   async function startScanning() {
+    // Guard: must be authenticated
+    if (!currentUser || !idToken) {
+      document.getElementById('authGuard').classList.add('visible');
+      addLog('err', 'Please sign in with Google first');
+      return;
+    }
+
     const wsUrl = document.getElementById('wsUrl').value.trim();
 
     // 1. Start camera
@@ -559,10 +766,13 @@
       return;
     }
 
-    // 2. Connect Socket.IO
+    // 2. Connect Socket.IO with Firebase ID token
     setWsStatus('connecting');
-    addLog('sys', `Connecting to ${wsUrl}…`);
-    socket = io(wsUrl, { transports: ['websocket'] });
+    addLog('sys', `Connecting to ${wsUrl} with Firebase auth…`);
+    socket = io(wsUrl, {
+      auth: { token: idToken },
+      transports: ['websocket'],
+    });
 
     socket.on('connect', () => {
       setWsStatus('connected');
@@ -572,14 +782,15 @@
       startFrameCapture();
     });
 
-    socket.on('response', (data) => {
-    console.log(data)
-      addLog('in', JSON.stringify(data));
-      handleResponse(data);
+    socket.on('response', (raw) => {
+      addLog('in', typeof raw === 'string' ? raw : JSON.stringify(raw));
+      try {
+        const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        handleResponse(data);
+      } catch (e) {
+        addLog('err', `Failed to parse response: ${e.message}`);
+      }
     });
-
-
- 
 
     socket.on('disconnect', () => {
       setWsStatus('disconnected');
@@ -590,7 +801,7 @@
 
     socket.on('connect_error', (e) => {
       setWsStatus('error');
-      addLog('err', `Connection error — is your server running? (${e.message})`);
+      addLog('err', `Connection error — ${e.message}`);
     });
 
     document.getElementById('btnStart').disabled = true;
@@ -627,7 +838,6 @@
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0);
 
-      const image = canvas.toDataURL('image/jpeg', 0.8);
       canvas.toBlob( blob=>{
         if(!blob) return;
         blob.arrayBuffer().then( buf => {
@@ -635,30 +845,26 @@
             addLog('out', `Frame sent — ${Math.round(buf.byteLength/1024)}KB`);
         })
       })
-    //   socket.emit('frame', { image });
-    //   addLog('out', `Frame sent — ${Math.round(image.length * 0.75 / 1024)}KB`);
-    }, 600); // every 600ms — enough for testing
+    }, 600);
   }
 
   function stopFrameCapture() {
     if (frameInterval) { clearInterval(frameInterval); frameInterval = null; }
   }
 
- 
-
-  // ── Handle Gemini Response 
+  // ── Handle response (per readme schema) ─────────────────────────────
   function handleResponse(data) {
-    const { status, instructions, guidance_text, medication } = data;
+    const { status, instruction, guidance_text, prescription_match } = data;
 
-    // Guidance text
+    // Guidance text — always update with latest response
     const box = document.getElementById('guidanceBox');
     box.textContent = guidance_text || '—';
     box.className = `guidance-box ${status || ''}`;
 
-    // Status chip
+    // Status chip — always update with latest response
     setStatus(status);
 
-    // Bracket colors
+    // Bracket colors — always update with latest response
     const brackets = ['bTL','bTR','bBL','bBR'].map(id => document.getElementById(id));
     brackets.forEach(b => {
       b.className = 'bracket ' + b.id.replace('b','').toLowerCase();
@@ -666,11 +872,10 @@
       else if (status === 'success') b.classList.add('success-color');
     });
 
-    // Empty overlay
+    // Empty overlay — always update with latest response
     document.getElementById('emptyOverlay').classList.toggle('show', status === 'no_object');
 
-    // Instruction arrow - handle new instructions array
-    const instruction = Array.isArray(instructions) ? instructions[0] : instructions;
+    // Instruction arrow — handle instruction (string per readme spec)
     const arrow = ARROW_MAP[instruction] || null;
     const arrowBubble = document.getElementById('arrowBubble');
     const instrArrow  = document.getElementById('instrArrow');
@@ -688,9 +893,8 @@
     }
 
     // Success — show extracted medication
-    if (status === 'success' && medication) {
-      stopFrameCapture(); // stop sending frames
-      showResult(medication);
+    if (status === 'success' && prescription_match && prescription_match.medication) {
+      showResult(prescription_match.medication);
     }
   }
 
@@ -758,47 +962,36 @@
     entry.textContent = `[${time}] ${msg}`;
     inner.appendChild(entry);
     inner.scrollTop = inner.scrollHeight;
-    // cap at 100 entries
     while (inner.children.length > 100) inner.removeChild(inner.firstChild);
   }
 
   // ── Init ───────────────────────────────────────────────────────────────
-  addLog('sys', 'MedScan demo ready. Press "Start Camera" to begin.');
+  addLog('sys', 'MedScan demo ready. Sign in with Google, then press "Start Camera".');
 
-  // Mock mode — simulate a server response for UI testing without a real backend
-  window.simulateResponse = function(status, instructions, guidance, medication) {
-    handleResponse({ status, instructions, guidance_text: guidance, medication });
+  // ── Mock mode — simulate a server response for UI testing ──────────────
+  window.simulateResponse = function(status, instruction, guidance, med) {
+    const payload = { status, instruction, guidance_text: guidance };
+    if (status === 'success' && med) {
+      payload.prescription_match = { medication: med, distance: 0.12, withinThreshold: true };
+    }
+    handleResponse(payload);
   };
 
-  // Quick mock test — open console and run:
-  // simulateResponse('positioning', 'rotate_right', 'Rotate the bottle slightly to the right so the label faces the camera.')
-  // simulateResponse('success', 'none', 'Label read successfully!', { drug_name: 'Lisinopril', dosage: '10mg', instructions: 'Take once daily', quantity: '30 tablets', refills: '2', prescriber: 'Dr. Smith', patient_name: 'Jane Doe', pharmacy: 'CVS Pharmacy', expiry_date: '2026-08', raw_label_text: 'LISINOPRIL 10MG TABLET...' })
-  
-  // Test with new schema structure
   window.testNewSchema = function() {
-    // Test with single instruction
     simulateResponse('positioning', 'rotate_right', 'Rotate the bottle slightly to the right so the label faces the camera.');
-    
-    // Test with array of instructions
     setTimeout(() => {
-      simulateResponse('positioning', ['move_closer', 'hold_still'], 'Move closer and hold still for better capture.');
-    }, 2000);
-    
-    // Test success with medication
-    setTimeout(() => {
-      simulateResponse('success', 'none', 'Label read successfully!', { 
-        drug_name: 'Lisinopril', 
-        dosage: '10mg', 
-        instructions: 'Take once daily', 
-        quantity: '30 tablets', 
-        refills: '2', 
-        prescriber: 'Dr. Smith', 
-        patient_name: 'Jane Doe', 
-        pharmacy: 'CVS Pharmacy', 
-        expiry_date: '2026-08', 
-        raw_label_text: 'LISINOPRIL 10MG TABLET...' 
+      simulateResponse('success', 'none', 'Label read successfully! Found Ibuprofen 200mg.', { 
+        name: 'Ibuprofen',
+        dosage: '200mg',
+        strength: '200mg',
+        frequency: 2,
+        unitsPerDose: 1,
+        timeSlots: ['08:00', '20:00'],
+        completedSlots: ['08:00', '20:00'],
+        instruction: 'Take with food',
+        composite_string: 'Ibuprofen 200mg tablet analgesic'
       });
-    }, 4000);
+    }, 2000);
   };
 </script>
 </body>

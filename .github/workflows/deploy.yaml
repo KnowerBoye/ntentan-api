@@ -29,19 +29,19 @@ jobs:
 
       - name: Build & Push Image
         env:
-            IMAGE: us-east4-docker.pkg.dev/deepmive/ntentan/api:${{ github.sha }}
+            IMAGE: us-west1-docker.pkg.dev/furwoodd-775d1/ntentan/api:${{ github.sha }}
         run: |
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
 
       - name: Deploy to Cloud Run
         env: 
-            IMAGE: us-east4-docker.pkg.dev/deepmive/ntentan/api:${{ github.sha }}
+            IMAGE: us-west1-docker.pkg.dev/furwoodd-775d1/ntentan/api:${{ github.sha }}
         run: |
 
           set -euo pipefail
 
-          RAW_ENV=$(gcloud secrets versions access latest --secret=ntentan-api-env --project=deepmive)
+          RAW_ENV=$(gcloud secrets versions access latest --secret=ntentan-api-env --project=furwoodd-775d1)
    
           if [ -z "$RAW_ENV" ]; then
             ENV_VARS="NODE_ENV=PRODUCTION"
@@ -52,18 +52,19 @@ jobs:
             ENV_VARS="${ENV_VARS},NODE_ENV=PRODUCTION"
           fi
 
-          SERVICE_ACCOUNT="ntentant@deepmive.iam.gserviceaccount.com"
+          SERVICE_ACCOUNT="ntentan-temp@furwoodd-775d1.iam.gserviceaccount.com"
 
           gcloud run deploy ntentan-api \
             --image="$IMAGE" \
-            --region=us-east4 \
+            --region=us-west1 \
             --platform=managed \
             --allow-unauthenticated \
             --update-env-vars="$ENV_VARS" \
             --service-account="$SERVICE_ACCOUNT" \
+            --update-secrets=/usr/src/ntentan-api/secrets/firebase_cred.json=NTENTAN_FIREBASE_CREDENTIALS:latest \
             --timeout=900s \
 
           
-           gcloud run services describe ntentan-api --project=deepmive --region=us-east4 --format=values(status.url)
+           gcloud run services describe ntentan-api --project=furwoodd-775d1 --region=us-west1 --format=values(status.url)
 
         

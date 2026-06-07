@@ -107,9 +107,9 @@ const embeddingAi = new GoogleGenAI({
   vertexai: true,
   project: PROJECT_ID,
   location: LOCATION,
-  googleAuthOptions : {
-    keyFilename : GOOGLE_APPLICATION_CREDENTIALS
-  }
+  // googleAuthOptions : {
+  //   keyFilename : GOOGLE_APPLICATION_CREDENTIALS
+  // }
 
 })
 
