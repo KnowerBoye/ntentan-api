@@ -1,28 +1,19 @@
 import {z} from "zod"
 
-
-
-const ContentType = z.enum(["user" , "assistant"])
-
 export const QueryAgentSchema = z.object({
-    body : z.object({
-    history : z.array(
-        z.object({
-        content : z.string({error : "Invalid content"}),
-        type : ContentType, 
-        role : z.enum(["user" , "assistant"])
-    })
-    ) , 
-    query : z.object({
-        content : z.string() , 
-        type : ContentType 
-    }) ,
-
-    languague : z.enum(["twi" , "eng"] , {
-        error : "Language must be one of twi | english" })
-
-
-}
-)
-
+  body: z.object({
+    query: z.object({
+      content: z.string(),
+      type: z.enum(["text", "audio"]),
+    }),
+    history: z.array(
+      z.object({
+        content: z.string(),
+        type: z.enum(["text", "audio"]),
+        role: z.enum(["user", "assistant"]),
+        language: z.enum(["english", "twi"]),
+      })
+    ).default([]),
+    language: z.enum(["english", "twi"]),
+  }),
 })

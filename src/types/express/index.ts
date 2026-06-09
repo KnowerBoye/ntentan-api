@@ -12,9 +12,14 @@ declare global {
         body?: unknown
         query?: unknown
         params?: unknown
-        } , 
+        },
 
-        // user : User, 
+        user?: {
+          uid: string;
+          email: string | null;
+          name: string | null;
+          picture: string | null;
+        },
         // sessionId : string 
   }
   }

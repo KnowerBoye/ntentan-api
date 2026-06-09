@@ -1,27 +1,23 @@
+import type { VectorValue } from "@google-cloud/firestore";
 
 export interface Prescription {
-  id: string;                           // Firestore doc ID
-  userId: string;
-  name: string;                         // drug name e.g. "Paracetamol"
-  dosage: string;                       // e.g. "500mg"
-  quantity: number;                     // e.g. 2 (tablets per dose)
-  time: "morning" | "afternoon" | "evening";
-  /**
-   * date: ISO string (YYYY-MM-DD) for a one-off specific date,
-   *       OR null for recurring prescriptions
-   */
-  date: string | null;
-  /**
-   * occurrence:
-   *   "daily"    – taken every day (date must be null)
-   *   "specified" – taken only on the specific `date`
-   */
-  occurrence: "daily" | "specified";
-  special?: string;                     // special instructions
+  id: string;
+  completedSlots: string[];          // e.g. ["2026-06-09_morning", "2026-06-09_afternoon"]
+  composite_string: string;          // enriched text for semantic search
+  createdAt: string;
+  dosage: string;                    // e.g. "2 tablets"
+  frequency: number;                 // times per day
+  instruction: string;               // special instructions / notes
+  name: string;                      // drug name e.g. "Paracetamol"
+  strength: string;                  // e.g. "500mg"
+  timeSlots: string[];               // e.g. ["morning", "afternoon", "evening"]
+  unitsPerDose: number;             // e.g. 2 (tablets per dose)
+  updatedAt: string;
+  name_embedding?: VectorValue;      // Firestore vector for semantic search
 }
 
 // ── Time-of-day windows ──────────────────────
-export const TIME_WINDOWS = {
+export const TIME_WINDOWS: Record<string, { label: string; start: string; end: string }> = {
   morning:   { label: "Morning",   start: "06:00", end: "12:00" },
   afternoon: { label: "Afternoon", start: "12:00", end: "17:00" },
   evening:   { label: "Evening",   start: "17:00", end: "22:00" },
@@ -83,7 +79,6 @@ export interface SearchDrugInfoInput {
   drugName: string;
   query?: string;
 }
-
 
 
 

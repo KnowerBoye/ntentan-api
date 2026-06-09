@@ -3,9 +3,9 @@ import dotenv from "dotenv"
 import {Server} from "socket.io"
 import {createServer} from "http"
 import {handleVideoStreamConnection} from "@features/medication-scanner/medscanner.service"
-import { handleAssistantSocket } from "./features/assistant/assistant.service"
 import { socketAuthMiddleware } from "@middlewares/socket-auth.middleware";
 import { globalErrorHandler, notFoundHandler } from "@middlewares/error-handler.middleware";
+import assistantRoutes from "@features/assistant/assistant.routes";
 import { logger } from "@/lib/logger";
 
 dotenv.config()
@@ -22,10 +22,10 @@ const io = new Server(server)
 // Apply Firebase JWT auth to all WebSocket namespaces
 io.use(socketAuthMiddleware);
 
-io.of("/assistant").on("connection" , handleAssistantSocket)
 io.of("/med-scanner").on("connection" , handleVideoStreamConnection)
 
-// ── Express routes would be registered here ──
+// ── Express routes ────────────────────────────
+app.use("/api/assistant", assistantRoutes);
 
 // ── Express error handlers (must be AFTER all routes) ──
 app.use(notFoundHandler);

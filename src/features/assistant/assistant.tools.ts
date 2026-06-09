@@ -1,5 +1,4 @@
-
-import { Tool , Type} from "@google/genai";
+import { Tool, Type } from "@google/genai";
 
 export const tools: Tool[] = [
   {
@@ -10,6 +9,8 @@ export const tools: Tool[] = [
         description: `Query the user's prescription records. Use this for ANY question about the user's personal medications.
 
 Resolve all relative date references to YYYY-MM-DD using the currentDate provided in the system prompt before calling this tool.
+
+Drug name matching uses semantic (vector) search — you can use brand names, generic names, or partial descriptions. For example "artemether" will match "Lufart DS".
 
 Intent mapping:
 - "today"      → what medications do I take today? (use targetDate = currentDate)
@@ -44,7 +45,7 @@ Examples:
             drugName: {
               type: Type.STRING,
               description:
-                "Drug name to filter by. Required for: next, last, check. Optional for: today, on_date.",
+                "Drug name to filter by (uses semantic vector search). Required for: next, last, check. Optional for: today, on_date, all_active.",
             },
           },
           required: ["intent"],

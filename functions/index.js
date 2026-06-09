@@ -33,16 +33,16 @@ setGlobalOptions({ maxInstances: 10 });
 
 
 
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
-import { Firestore, FieldValue } from "@google-cloud/firestore";
-import { GoogleGenAI, Type } from "@google/genai";
-import dotenv from "dotenv"
+const  { onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { Firestore, FieldValue } = require("@google-cloud/firestore");
+const { GoogleGenAI, Type } = require("@google/genai");
+const dotenv = require("dotenv")
 
 dotenv.config();
 
 
 
-const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT;
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID;
 const LOCATION = "us-central1";
 const EMBEDDING_MODEL = "text-embedding-004";
 const EMBEDDING_FIELD = "name_embedding";
@@ -52,10 +52,20 @@ const firestore = new Firestore({ projectId: PROJECT_ID });
 
 // Initialize the single, modern Google GenAI SDK client for Vertex AI
 const ai = new GoogleGenAI({
+  // vertexai: true,
+  // project: PROJECT_ID,
+  // location: LOCATION,
+   apiKey : GEMINI_API_KEY,
+});
+
+const embeddingAi = new GoogleGenAI({
   vertexai: true,
   project: PROJECT_ID,
   location: LOCATION,
-   apiKey : GEMINI_API_KEY,
+  googleAuthOptions : {
+    keyFilename : process.env.GOOGLE_APPLICATION_CREDENTIALS
+  }
+
 });
 
 // ---------------------------------------------------------------------------
@@ -69,7 +79,7 @@ const ai = new GoogleGenAI({
  */
 async function buildCompositeString(name, dosage) {
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash", 
+    model: "models/gemini-2.5-flash", 
     contents: [
       `Medication name: ${name}\n` +
       `Dosage: ${dosage}\n\n` +
@@ -108,7 +118,7 @@ async function buildCompositeString(name, dosage) {
  * @returns {Promise<number[]>}
  */
 async function embedText(text) {
-  const response = await ai.models.embedContent({
+  const response = await embeddingAi.models.embedContent({
     model: EMBEDDING_MODEL,
     contents: text,
   });
@@ -123,7 +133,7 @@ async function embedText(text) {
 }
 
 
-export const embedMedicationOnWrite = onDocumentWritten(
+  const embedMedicationOnWrite = onDocumentWritten(
   "users/{userId}/medications/{medicationId}",
   async (event) => {
     const { userId, medicationId } = event.params;

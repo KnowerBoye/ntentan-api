@@ -1,5 +1,4 @@
-
-import { format, parseISO, addDays, subDays, isAfter, isBefore, isEqual } from "date-fns";
+import { format, parseISO, addDays, subDays } from "date-fns";
 import { Prescription, TIME_WINDOWS } from "@/types/assistant";
 
 /** Today as YYYY-MM-DD */
@@ -17,91 +16,102 @@ export function displayDate(iso: string): string {
   return format(parseISO(iso), "EEEE, MMMM d, yyyy");
 }
 
-/** Format time-of-day slot for display */
-export function displayTime(slot: "morning" | "afternoon" | "evening"): string {
+/** Format a time-of-day slot ID for display (e.g. "morning" → "Morning (06:00–12:00)") */
+export function displayTime(slot: string): string {
   const w = TIME_WINDOWS[slot];
+  if (!w) return slot; // fallback for unknown slot names
   return `${w.label} (${w.start}–${w.end})`;
 }
 
-/** Current time-of-day slot */
-export function currentTimeSlot(): "morning" | "afternoon" | "evening" {
-  const hhmm = nowHHMM();
-  if (hhmm >= "06:00" && hhmm < "12:00") return "morning";
-  if (hhmm >= "12:00" && hhmm < "17:00") return "afternoon";
-  return "evening";
+/** Format all time slots for display */
+export function displayTimeSlots(slots: string[]): string {
+  return slots.map(displayTime).join(", ");
 }
 
 /**
- * Returns true if a prescription should be taken on `targetDate`.
+ * Build a canonical slot key from a date and slot ID.
+ * e.g. "2026-06-09" + "morning" → "2026-06-09_morning"
+ */
+export function slotKey(date: string, slot: string): string {
+  return `${date}_${slot}`;
+}
+
+/**
+ * Returns true if a prescription has ANY time slot on `targetDate`
+ * that has NOT yet been completed.
  *
- * Logic:
- *   - occurrence = "daily"     → always active (no end date in schema, assumed ongoing)
- *   - occurrence = "specified" → only active on p.date (must equal targetDate)
+ * A slot is "completed" if its slotKey (YYYY-MM-DD_slotId) exists
+ * in the prescription's completedSlots array.
  */
 export function isPrescriptionActiveOnDate(
   p: Prescription,
   targetDate: string // YYYY-MM-DD
 ): boolean {
-  if (p.occurrence === "daily") return true;
-  if (p.occurrence === "specified") return p.date === targetDate;
-  return false;
+  return p.timeSlots.some((slot) => {
+    const key = slotKey(targetDate, slot);
+    return !p.completedSlots.includes(key);
+  });
 }
 
 /**
  * For "next dose" queries: find the next upcoming date+time slot
  * for a prescription, starting from now.
  *
- * Returns { date: YYYY-MM-DD, time: slot } or null if not schedulable.
+ * Returns { date, time } or null if all slots are completed.
  */
 export function getNextDoseDateTime(p: Prescription): {
   date: string;
-  time: "morning" | "afternoon" | "evening";
+  time: string;
 } | null {
   const today = todayISO();
-  const slot = p.time;
-  const window = TIME_WINDOWS[slot];
   const currentTime = nowHHMM();
 
-  if (p.occurrence === "specified") {
-    // One-off prescription: only valid if its date is today-or-future
-    if (!p.date) return null;
-    if (p.date < today) return null; // already past
-    if (p.date === today && currentTime >= window.end) return null; // today but time passed
-    return { date: p.date, time: slot };
+  // Check today's slots first
+  for (const slot of p.timeSlots) {
+    const window = TIME_WINDOWS[slot];
+    if (!window) continue;
+    const key = slotKey(today, slot);
+
+    // Skip if already completed
+    if (p.completedSlots.includes(key)) continue;
+
+    // If current time is before the window ends, it's still upcoming
+    if (currentTime < window.end) {
+      return { date: today, time: slot };
+    }
   }
 
-  // Daily: check if today's slot is still upcoming
-  if (currentTime < window.end) {
-    return { date: today, time: slot };
+  // All today's slots passed or completed → look at tomorrow
+  // (We assume daily recurrence — every day the prescription is active
+  //  unless all future slots on record are completed. For MVP, return
+  //  the first slot tomorrow.)
+  const tomorrow = format(addDays(parseISO(today), 1), "yyyy-MM-dd");
+  for (const slot of p.timeSlots) {
+    const key = slotKey(tomorrow, slot);
+    if (!p.completedSlots.includes(key)) {
+      return { date: tomorrow, time: slot };
+    }
   }
-  // Slot passed today → next occurrence is tomorrow
-  return { date: format(addDays(parseISO(today), 1), "yyyy-MM-dd"), time: slot };
+
+  // All slots completed for today and tomorrow — no upcoming
+  return null;
 }
 
 /**
- * For "last dose" queries: find the most recent past date+time slot.
- * For daily prescriptions this is always today or yesterday.
+ * For "last dose" queries: find the most recent completed dose.
+ *
+ * Searches completedSlots and returns the most recent one chronologically.
  */
 export function getLastDoseDateTime(p: Prescription): {
   date: string;
-  time: "morning" | "afternoon" | "evening";
+  time: string;
 } | null {
-  const today = todayISO();
-  const slot = p.time;
-  const window = TIME_WINDOWS[slot];
-  const currentTime = nowHHMM();
+  if (!p.completedSlots.length) return null;
 
-  if (p.occurrence === "specified") {
-    if (!p.date) return null;
-    if (p.date > today) return null; // future-only, never taken
-    if (p.date === today && currentTime < window.start) return null; // not yet today
-    return { date: p.date, time: slot };
-  }
+  // Parse slot keys like "2026-06-09_morning" → sort descending
+  const sorted = [...p.completedSlots].sort().reverse();
+  const lastKey = sorted[0];
+  const [date, time] = lastKey.split("_");
 
-  // Daily: if today's slot has started, last dose = today
-  if (currentTime >= window.start) {
-    return { date: today, time: slot };
-  }
-  // Slot hasn't started yet today → last dose was yesterday
-  return { date: format(subDays(parseISO(today), 1), "yyyy-MM-dd"), time: slot };
+  return { date, time };
 }
