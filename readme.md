@@ -4,11 +4,17 @@ WebSocket API server for medication scanning and medical assistant services, pow
 
 ---
 
-##  Authentication
+## 🔐 Authentication
 
+### HTTP Endpoints
+All HTTP endpoints (e.g. `/api/assistant/chat`) require Firebase JWT authentication via the `Authorization` header.
+
+| Method | Location | Example |
+| :----- | :------- | :------ |
+| Bearer token | `Authorization` header | `Authorization: Bearer <FIREBASE_ID_TOKEN>` |
+
+### WebSocket Namespaces
 All WebSocket namespaces require **Firebase JWT authentication**. The token is verified on every connection.
-
-### Auth Methods
 
 | Method | Location | Example |
 | :----- | :------- | :------ |
@@ -17,11 +23,11 @@ All WebSocket namespaces require **Firebase JWT authentication**. The token is v
 
 ### Failure
 
-If the token is missing or invalid, the connection is rejected with an `UnauthorizedError` and the socket will not connect.
+If the token is missing or invalid, the connection or request is rejected with an appropriate error.
 
 ---
 
-##  Medication Scanner (WebSocket)
+## 📷 Medication Scanner (WebSocket)
 
 The `med-scanner` namespace provides real-time medication label scanning. The client streams camera frames, and the server uses Gemini 2.5 Flash to provide positioning feedback until the label is successfully read, then performs vector similarity search against the user's saved medications.
 
@@ -220,7 +226,7 @@ socket.on("response", (jsonString) => {
       break;
 
     case "success":
-      console.log(` ${data.guidance_text}`);
+      console.log(`✅ ${data.guidance_text}`);
       if (data.prescription_match) {
         console.log("Matched medication:", data.prescription_match.medication.name);
         console.log("Match confidence:", data.prescription_match.distance);
@@ -292,7 +298,7 @@ class MedScannerService {
         break;
 
       case 'success':
-        print('${response['guidance_text']}');
+        print('✅ ${response['guidance_text']}');
         final match = response['prescription_match'];
         if (match != null) {
           final med = match['medication'] as Map<String, dynamic>;
@@ -310,138 +316,281 @@ class MedScannerService {
 
 ---
 
-## 🤖 Medical Assistant (WebSocket)
+## 🤖 Medical Assistant (REST API)
 
-The `assistant` endpoint provides a persistent session for medical inquiries. It maintains a conversation history in memory and processes both text and audio inputs, with specialised support for **Twi** language translation and transcription.
+The assistant is available via an **HTTP REST endpoint** (no WebSocket). The client owns and sends the full conversation history with each request, making the API stateless and suitable for serverless environments.
 
 ### **Endpoint**
+
 ```
-WS /assistant
+POST /api/assistant/chat
 ```
+
+### **Headers**
+
+| Header | Value | Required |
+| :----- | :---- | :------- |
+| `Authorization` | `Bearer <FIREBASE_ID_TOKEN>` | ✅ Yes |
+| `Content-Type` | `application/json` | ✅ Yes |
 
 ### **Workflow**
-1. **Connection**: A unique session history is initialised for the user.
-2. **Multimodal Processing**:
-   * **English Text/Audio**: Passed to the Medical Assistant.
-   * **Twi Text**: Translated to English before processing.
-   * **Twi Audio**: Transcribed and translated to English text via a voice service.
-3. **Persistence**: Every exchange is pushed to a `history` array to maintain context for the AI.
 
----
+```
+┌──────────┐   POST /api/assistant/chat    ┌──────────────────┐   JSON response    ┌──────────┐
+│  Client  │ ─── { query, history } ──────→ │  Assistant       │ ─── { message }  → │  Client  │
+│          │                                │  (Gemini 2.5)    │                   │          │
+└──────────┘                                └──────────────────┘                   └──────────┘
+```
 
-### **Request Payload**
-The client emits a `message` event. Audio content must be sent as a **Base64 encoded string**.
+1. **Authenticate**: Attach Firebase JWT token as `Authorization: Bearer <token>`.
+2. **Send**: `POST /api/assistant/chat` with the user's query and conversation history.
+3. **Process**: The server handles Twi translation/transcription if needed, calls Gemini with tool access (prescription queries, drug info lookup).
+4. **Response**: Server returns the AI response message. The client is responsible for persisting the conversation history and sending it with the next request.
 
-**Event Name:** `message`
+### **Request Body**
+
+```json
+{
+  "query": {
+    "content": "What medications should I take this morning?",
+    "type": "text"
+  },
+  "history": [
+    {
+      "content": "I have a headache",
+      "type": "text",
+      "role": "user",
+      "language": "english"
+    },
+    {
+      "content": "I'm sorry to hear that. Let me check your prescriptions for headache relief options.",
+      "type": "text",
+      "role": "assistant",
+      "language": "english"
+    }
+  ],
+  "language": "english"
+}
+```
 
 | Field | Type | Description |
 | :---- | :--- | :---------- |
-| `type` | `string` | `"text"` or `"audio"` |
-| `content` | `string` | The message text or **Base64 encoded** audio string |
-| `language` | `string` | `"english"` or `"twi"` |
-
----
+| `query` | `object` | **Required.** The user's current message |
+| `query.content` | `string` | The message text or **Base64-encoded** audio string |
+| `query.type` | `string` | `"text"` or `"audio"` |
+| `history` | `array` | **Optional.** Previous conversation messages (default `[]`) |
+| `history[].content` | `string` | Message text |
+| `history[].type` | `string` | `"text"` or `"audio"` |
+| `history[].role` | `string` | `"user"` or `"assistant"` |
+| `history[].language` | `string` | `"english"` or `"twi"` |
+| `language` | `string` | Language of the current query: `"english"` or `"twi"` |
 
 ### **Response Schema**
-The server emits a `response` event containing the assistant's clinical feedback.
 
-**Event Name:** `response`
+**Status:** `200 OK`
+
+#### English Response
+
+When the query language is `"english"`:
+
+```json
+{
+  "status": "success",
+  "data": {
+    "message": "Based on your prescriptions, you need to take:\n\n- **Metformin 500mg** — 1 tablet (Morning with breakfast)\n- **Lisinopril 10mg** — 1 tablet (Morning)\n\nRemember to take them with food! ⚕️",
+    "history": [
+      { "content": "...", "type": "text", "role": "user", "language": "english" },
+      { "content": "Based on your prescriptions...", "type": "text", "role": "assistant", "language": "english" }
+    ]
+  }
+}
+```
+
+#### Twi Response
+
+When the query language is `"twi"`, the response includes an `audio` field containing a **Base64-encoded MP3** of the Twi text spoken aloud:
+
+```json
+{
+  "status": "success",
+  "data": {
+    "message": "Sɛ wokura wo nnur a, ɛsɛ sɛ wogye...",
+    "history": [
+      { "content": "...", "type": "text", "role": "user", "language": "twi" },
+      { "content": "Sɛ wokura wo nnur a...", "type": "text", "role": "assistant", "language": "twi" }
+    ],
+    "audio": "//uQxAAA... (Base64-encoded MP3)"
+  }
+}
+```
 
 | Field | Type | Description |
 | :---- | :--- | :---------- |
-| `role` | `string` | Always `"assistant"` |
-| `content` | `string` | The plain text response from the AI |
-| `type` | `string` | `"text"` |
-| `language` | `string` | `"english"` |
+| `status` | `string` | Always `"success"` |
+| `data` | `object` | The response payload |
+| `data.message` | `string` | The assistant's text response |
+| `data.history` | `ChatMessage[]` | Updated conversation history (client should persist and send next time) |
+| `data.audio` | `string` (Base64) | **Twi only.** Base64-encoded MP3 audio of the spoken Twi response |
 
----
+### **Twi Language Support**
 
-### **Example: JavaScript (Socket.IO Client)**
+The assistant supports **bidirectional Twi ↔ English** translation for both text and audio inputs.
+
+#### Input Processing
+
+| Query Language | Query Type | Processing |
+| :------------- | :--------- | :--------- |
+| `english` | `text` | Sent directly to Gemini |
+| `english` | `audio` | Transcribed via speech-to-text, then sent to Gemini |
+| `twi` | `text` | Translated to English (Twi → English), then sent to Gemini |
+| `twi` | `audio` | Transcribed to Twi text, then translated to English (Twi → English), then sent to Gemini |
+
+#### Response Translation & Audio
+
+The assistant's English response is automatically translated back to the user's input language. For Twi responses, the server also generates spoken audio via TTS.
+
+| User Language | Response Language | Audio | Processing |
+| :------------ | :---------------- | :---- | :--------- |
+| `english` | English | ❌ None | Returned as-is |
+| `twi` | Twi | ✅ Base64 MP3 (via `audio` field) | Translated English → Twi via Ghana NLP API, then synthesized to speech |
+
+### **Example: JavaScript (Fetch API)**
 
 ```javascript
-import { io } from "socket.io-client";
+const API_BASE = "https://your-server.com";
 
-const socket = io("https://your-server.com/assistant", {
-  auth: { token: "<FIREBASE_ID_TOKEN>" },
-  transports: ["websocket"],
-});
-
-// ── Send text message ────────────────────────────────────────
-function sendMessage(text, language = "english") {
-  socket.emit("message", {
-    type: "text",
-    language: language,
-    content: text,
+/**
+ * Send a message to the assistant and get a response.
+ * The caller is responsible for persisting `history` and passing it
+ * back on the next call to maintain conversation continuity.
+ */
+async function chatWithAssistant(
+  firebaseToken,
+  content,
+  { type = "text", language = "english", history = [] } = {}
+) {
+  const res = await fetch(`${API_BASE}/api/assistant/chat`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${firebaseToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      query: { content, type },
+      history,
+      language,
+    }),
   });
+
+  if (!res.ok) {
+    throw new Error(`Assistant API error: ${res.status} ${res.statusText}`);
+  }
+
+  const json = await res.json();
+  return json.data.message;
 }
 
-// ── Send Twi audio as Base64 ─────────────────────────────────
-function sendTwiAudio(base64String) {
-  socket.emit("message", {
-    type: "audio",
-    language: "twi",
-    content: base64String,
-  });
-}
+// ── Usage ────────────────────────────────────────────────────
 
-// ── Receive AI response ──────────────────────────────────────
-socket.on("response", (data) => {
-  // data = { role: "assistant", content: "...", type: "text", language: "english" }
-  console.log("Assistant:", data.content);
-});
+// Persist history across the session
+let conversationHistory = [];
 
-socket.on("error", (msg) => console.error("Server Error:", msg));
+// First message
+const response1 = await chatWithAssistant(
+  "<FIREBASE_ID_TOKEN>",
+  "What medications should I take this morning?",
+  { history: conversationHistory }
+);
+
+console.log("Assistant:", response1);
+
+// Manually append to history
+conversationHistory.push(
+  { content: "What medications should I take this morning?", type: "text", role: "user", language: "english" },
+  { content: response1, type: "text", role: "assistant", language: "english" }
+);
+
+// Second message (continues the conversation)
+const response2 = await chatWithAssistant(
+  "<FIREBASE_ID_TOKEN>",
+  "What about evening?",
+  { history: conversationHistory }
+);
+
+console.log("Assistant:", response2);
+conversationHistory.push(
+  { content: "What about evening?", type: "text", role: "user", language: "english" },
+  { content: response2, type: "text", role: "assistant", language: "english" }
+);
 ```
 
 ### **Example: Flutter (Dart)**
 
 ```dart
-import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class AssistantService {
-  late IO.Socket _socket;
+  final String baseUrl;
+  final String firebaseToken;
+  List<Map<String, dynamic>> _history = [];
 
-  void connect(String serverUrl, String firebaseToken) {
-    _socket = IO.io(
-      '$serverUrl/assistant',
-      IO.OptionBuilder()
-        .setAuth({'token': firebaseToken})
-        .setTransports(['websocket'])
-        .build(),
+  AssistantService({required this.baseUrl, required this.firebaseToken});
+
+  /// Send a message to the assistant.
+  /// Returns the assistant's text response.
+  /// The caller is responsible for managing conversation history.
+  Future<String> chat({
+    required String content,
+    String type = 'text',
+    String language = 'english',
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/assistant/chat');
+
+    final res = await http.post(
+      uri,
+      headers: {
+        'Authorization': 'Bearer $firebaseToken',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'query': {'content': content, 'type': type},
+        'history': _history,
+        'language': language,
+      }),
     );
+
+    if (res.statusCode != 200) {
+      throw Exception('Assistant API error: ${res.statusCode}');
+    }
+
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final message = body['data']['message'] as String;
+
+    // The caller should manually append to _history after each exchange
+    return message;
   }
 
-  /// Send a text message (English or Twi)
-  void sendText(String text, {String language = 'english'}) {
-    _socket.emit('message', {
-      'type': 'text',
-      'language': language,
-      'content': text,
-    });
-  }
-
-  /// Send audio bytes (must be Base64 encoded)
-  void sendAudio(List<int> bytes, {String language = 'english'}) {
-    String base64Audio = base64Encode(bytes);
-    _socket.emit('message', {
-      'type': 'audio',
-      'language': language,
-      'content': base64Audio,
-    });
-  }
-
-  /// Listen for assistant responses
-  void onResponse(void Function(Map<String, dynamic>) callback) {
-    _socket.on('response', (data) {
-      callback(data as Map<String, dynamic>);
-    });
-  }
-
-  void disconnect() {
-    _socket.disconnect();
+  void resetHistory() {
+    _history = [];
   }
 }
+```
+
+### **Example: cURL**
+
+```bash
+curl -X POST https://your-server.com/api/assistant/chat \
+  -H "Authorization: Bearer <FIREBASE_ID_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": {
+      "content": "What medications should I take this morning?",
+      "type": "text"
+    },
+    "history": [],
+    "language": "english"
+  }'
 ```
 
 ---
@@ -487,17 +636,25 @@ src/
 │   ├── medication-scanner/
 │   │   └── medscanner.service.ts       # MedScanner WebSocket handler, Gemini inference, vector search
 │   └── assistant/
-│       ├── assistant.service.ts        # Assistant WebSocket handler
+│       ├── assistant.routes.ts          # Express routes for POST /api/assistant/chat
+│       ├── assistant.service.ts         # Assistant request handler (HTTP)
+│       ├── assistant.schema.ts          # Zod validation schemas for the chat endpoint
 │       ├── assistant.ts                # MedicalAssistant class (Gemini chat)
-│       ├── voice.service.ts            # Twi audio transcription & translation
-│       └── ...
+│       ├── assistant.tools.ts          # Gemini tool definitions
+│       ├── prescription.tools.ts       # Prescription query tools (vector search, CRUD)
+│       ├── drugInfo.tools.ts           # Drug information lookup (OpenFDA + LLM)
+│       └── voice.service.ts            # Twi audio transcription & translation
 ├── middlewares/
-│   ├── socket-auth.middleware.ts       # Firebase JWT authentication middleware
-│   └── error-handler.middleware.ts     # Global error handling
+│   ├── auth.middleware.ts              # Firebase JWT authentication middleware (HTTP)
+│   ├── socket-auth.middleware.ts       # Firebase JWT authentication middleware (WebSocket)
+│   ├── error-handler.middleware.ts     # Global error handling
+│   └── validator.middleware.ts         # Zod validation middleware
 ├── types/
 │   ├── medscanner.ts                   # MedScanner response types, Zod schemas
-│   └── assistant.ts                    # Assistant message types
-└── lib/
-    ├── firebase.ts                     # Firebase admin initialisation
-    ├── logger.ts                       # Structured logger
-    └── errors.ts                       # Custom error classes
+│   └── assistant.ts                    # Assistant message types, Prescription, DrugInfo
+├── lib/
+│   ├── firebase.ts                     # Firebase admin initialisation
+│   ├── logger.ts                       # Structured logger
+│   └── errors.ts                       # Custom error classes
+└── prompts/
+    └── index.ts                        # System prompts / few-shot examples

@@ -8,6 +8,8 @@ import {
 import {
   Prescription,
   QueryPrescriptionsInput,
+  SavePrescriptionInput,
+  SavePrescriptionResult,
   PrescriptionQueryResult,
   ToolResult,
 } from "@/types/assistant";
@@ -100,7 +102,81 @@ async function matchDrugs(
   );
 }
 
-// ── Main query function ──────────────────────
+// ── Save Prescription ────────────────────────
+
+export async function savePrescription(
+  input: SavePrescriptionInput
+): Promise<ToolResult<SavePrescriptionResult>> {
+  try {
+    const { userId, name, timeSlots, dosage, unitsPerDose, frequency, strength, instruction } = input;
+
+    // ── Validate timeSlots are valid ──
+    const VALID_SLOTS = ["morning", "afternoon", "evening"];
+    for (const slot of timeSlots) {
+      if (!VALID_SLOTS.includes(slot)) {
+        return {
+          success: false,
+          error: `Invalid time slot "${slot}". Valid slots are: ${VALID_SLOTS.join(", ")}`,
+        };
+      }
+    }
+
+    const db = getFirestore();
+    const now = new Date().toISOString();
+
+    // ── Build the document ──
+    const docData = {
+      name,
+      timeSlots,
+      dosage,
+      unitsPerDose,
+      frequency,
+      strength: strength ?? "",
+      instruction: instruction ?? "",
+      completedSlots: [],
+      composite_string: `${name} ${strength ?? ""} ${dosage}`.trim(),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const docRef = await db
+      .collection("users")
+      .doc(userId)
+      .collection("medications")
+      .add(docData);
+
+    logger.info("Prescription saved", { userId, prescriptionId: docRef.id, name });
+
+    // ── Generate embedding asynchronously (fire & forget) ──
+    embedText(name)
+      .then((vector) => {
+        const db2 = getFirestore();
+        return db2
+          .collection("users")
+          .doc(userId)
+          .collection("medications")
+          .doc(docRef.id)
+          .update({ name_embedding: vector });
+      })
+      .catch((err) => {
+        logger.warn("Failed to generate embedding for saved prescription", {
+          prescriptionId: docRef.id,
+          error: String(err),
+        });
+      });
+
+    return {
+      success: true,
+      data: {
+        id: docRef.id,
+        name,
+      },
+    };
+  } catch (err) {
+    logger.error("Failed to save prescription", { error: String(err) });
+    return { success: false, error: String(err) };
+  }
+}
 
 export async function queryPrescriptions(
   input: QueryPrescriptionsInput

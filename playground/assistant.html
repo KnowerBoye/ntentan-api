@@ -7,7 +7,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet" />
-  <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
 
   <style>
     /* ═══════════════════════════════════════════
@@ -70,12 +69,13 @@
       background: var(--navy-2);
       gap: 16px;
       flex-shrink: 0;
+      flex-wrap: wrap;
     }
     .header-brand { display: flex; align-items: center; gap: 12px; }
     .brand-icon svg { width: 36px; height: 36px; filter: drop-shadow(0 2px 8px var(--amber-glow)); }
     .brand-name { font-family: var(--font-display); font-size: 22px; font-weight: 400; letter-spacing: -0.3px; line-height: 1.2; }
     .brand-sub  { font-size: 11.5px; color: var(--slate-6); font-weight: 300; }
-    .header-controls { display: flex; align-items: center; gap: 12px; }
+    .header-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
     /* ── Language toggle ── */
     .lang-toggle {
@@ -96,6 +96,30 @@
     .lang-btn.active { background: var(--amber); color: var(--navy); font-weight: 600; }
     .lang-btn:not(.active):hover { color: var(--slate-1); }
 
+    /* ── Token input ── */
+    .token-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 200px;
+    }
+    #token-input {
+      flex: 1;
+      background: var(--navy-3);
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: var(--radius-pill);
+      padding: 6px 12px;
+      color: var(--slate-1);
+      font-family: var(--font-body);
+      font-size: 11.5px;
+      outline: none;
+      min-width: 120px;
+      transition: border-color 0.2s;
+    }
+    #token-input::placeholder { color: var(--slate-6); }
+    #token-input:focus { border-color: rgba(232,160,48,0.4); }
+
     /* ── Status pill ── */
     .status-pill {
       display: flex; align-items: center; gap: 6px;
@@ -111,11 +135,13 @@
       background: var(--slate-6); flex-shrink: 0;
       transition: background 0.3s;
     }
-    .status-pill.connected   { color: var(--green); }
-    .status-pill.connected   .status-pip { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    .status-pill.connecting  .status-pip { background: var(--amber); animation: blink 1s infinite; }
-    .status-pill.error       { color: var(--red); }
-    .status-pill.error       .status-pip { background: var(--red); }
+    .status-pill.ready      { color: var(--green); }
+    .status-pill.ready      .status-pip { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .status-pill.waiting   .status-pip { background: var(--amber); animation: blink 1s infinite; }
+    .status-pill.error      { color: var(--red); }
+    .status-pill.error      .status-pip { background: var(--red); }
+    .status-pill.missing-token { color: var(--amber); }
+    .status-pill.missing-token .status-pip { background: var(--amber); animation: blink 1s infinite; }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
     /* ── Messages area ── */
@@ -174,11 +200,6 @@
 
     .bubble-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
     .bubble-time { font-size: 11px; opacity: 0.5; margin-left: auto; white-space: nowrap; }
-    .tool-tag {
-      font-size: 10px; background: rgba(232,160,48,0.12); color: var(--amber);
-      border: 1px solid rgba(232,160,48,0.2); padding: 2px 7px;
-      border-radius: var(--radius-pill); text-transform: capitalize;
-    }
 
     /* ── Audio bubble ── */
     .audio-row { display: flex; align-items: center; gap: 10px; }
@@ -202,7 +223,7 @@
     @keyframes wave { 0%,100%{height:4px;opacity:0.3} 50%{height:20px;opacity:0.8} }
     .bubble-transcript { font-size: 12.5px; opacity: 0.7; font-style: italic; margin-top: 4px; }
 
-    /* ── Thinking bubble ── */
+    /* ── Thinking indicator ── */
     .thinking-bubble {
       display: flex; align-items: flex-end; gap: 10px;
       animation: slideUp 0.22s ease;
@@ -333,7 +354,8 @@
       .header { padding: 12px 16px; }
       .messages-area { padding: 16px 12px; }
       .input-bar { padding: 12px 14px; }
-      .brand-sub, .status-pill { display: none; }
+      .brand-sub { display: none; }
+      .token-section { min-width: 100%; }
       .bubble { max-width: 85%; }
     }
   </style>
@@ -361,9 +383,9 @@
         <button class="lang-btn active" data-lang="english">EN</button>
         <button class="lang-btn" data-lang="twi">TWI</button>
       </div>
-      <div class="status-pill connecting" id="status-pill">
+      <div class="status-pill missing-token" id="status-pill">
         <span class="status-pip"></span>
-        <span id="status-label">Connecting…</span>
+        <span id="status-label">Token required</span>
       </div>
     </div>
   </header>
@@ -377,6 +399,9 @@
       </svg>
       <h2 class="empty-title">How can I help you today?</h2>
       <p class="empty-desc">Ask about your medications, dosages, or schedule — by voice or text.</p>
+      <div class="token-section" style="max-width:400px; margin-top:8px">
+        <input type="text" id="token-input" placeholder="Paste your Firebase ID token…" />
+      </div>
       <div class="suggestion-chips">
         <button class="chip" data-query="What do I take today?">What do I take today?</button>
         <button class="chip" data-query="When is my next paracetamol?">When is my next paracetamol?</button>
@@ -388,7 +413,7 @@
   <!-- ── Input bar ── -->
   <footer class="input-bar">
     <div class="input-wrap">
-      <textarea id="text-input" rows="1" placeholder="Ask about your medications…"></textarea>
+      <textarea id="text-input" rows="1" placeholder="Enter your token above, then ask a question…"></textarea>
       <button class="send-btn" id="send-btn" disabled>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="22" y1="2" x2="11" y2="13"/>
@@ -441,17 +466,18 @@
 
 <script>
 
-
-const SOCKET_URL = 'http://localhost:8080/assistant';
+const API_BASE = "http://localhost:8080"
 
 // ── State ────────────────────────────────────────
 const state = {
-  language:    'english',   // 'english' | 'twi'
-  connected:   false,
-  thinking:    false,
-  recording:   false,
-  processing:  false,
-  messages:    [],
+  language:     'english',   // 'english' | 'twi'
+  token:        '',
+  ready:        false,       // true when token is set
+  thinking:     false,
+  recording:    false,
+  processing:   false,
+  messages:     [],          // user messages (display)
+  history:      [],          // ChatMessage[] sent with each request
 };
 
 // ── DOM refs ─────────────────────────────────────
@@ -468,6 +494,7 @@ const $statusPill  = document.getElementById('status-pill');
 const $statusLabel = document.getElementById('status-label');
 const $langBtns    = document.querySelectorAll('.lang-btn');
 const $chips       = document.querySelectorAll('.chip');
+const $tokenInput  = document.getElementById('token-input');
 
 // ── Utilities ─────────────────────────────────────
 function nanoid() {
@@ -488,6 +515,18 @@ function setStatus(mode, label) {
   $statusLabel.textContent = label;
 }
 
+// ── Token input ───────────────────────────────────
+$tokenInput.addEventListener('input', () => {
+  state.token = $tokenInput.value.trim();
+  state.ready = !!state.token;
+  if (state.ready) {
+    setStatus('ready', 'Ready');
+  } else {
+    setStatus('missing-token', 'Token required');
+  }
+  updateUI();
+});
+
 // ── Language toggle ────────────────────────────────
 $langBtns.forEach(btn => {
   btn.addEventListener('click', () => {
@@ -505,7 +544,7 @@ $chips.forEach(chip => {
     $textInput.value = chip.dataset.query;
     autoResize($textInput);
     $textInput.focus();
-    updateSendBtn();
+    updateUI();
   });
 });
 
@@ -517,7 +556,7 @@ function autoResize(el) {
 
 $textInput.addEventListener('input', () => {
   autoResize($textInput);
-  updateSendBtn();
+  updateUI();
 });
 
 $textInput.addEventListener('keydown', e => {
@@ -527,8 +566,11 @@ $textInput.addEventListener('keydown', e => {
   }
 });
 
-function updateSendBtn() {
-  $sendBtn.disabled = !$textInput.value.trim() || !state.connected || state.thinking;
+function updateUI() {
+  const canSend = !!$textInput.value.trim() && state.ready && !state.thinking;
+  $sendBtn.disabled = !canSend;
+  $textInput.disabled = state.thinking;
+  $voiceBtn.disabled = !state.ready || state.thinking || state.recording || state.processing;
 }
 
 $sendBtn.addEventListener('click', sendText);
@@ -536,13 +578,6 @@ $sendBtn.addEventListener('click', sendText);
 // ── Render helpers ────────────────────────────────
 function avatarSVG(role) {
   return `<div class="bubble-avatar">${svgUse(role === 'user' ? 'icon-user-avatar' : 'icon-medi-avatar')}</div>`;
-}
-
-function toolTags(tools) {
-  if (!tools?.length) return '';
-  return tools.map(t =>
-    `<span class="tool-tag">${t.replace(/_/g, ' ')}</span>`
-  ).join('');
 }
 
 function waveformBars(count = 18) {
@@ -578,7 +613,6 @@ function appendMessage(msg) {
 
   const meta = `
     <div class="bubble-meta">
-      <span class="bubble-tools">${toolTags(msg.toolsUsed)}</span>
       <span class="bubble-time">${fmtTime(msg.timestamp)}</span>
     </div>
   `;
@@ -631,7 +665,9 @@ function scrollToBottom() {
 }
 
 function escHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return str.replace(/[&<>"]/g, function(m) {
+    return m === '&' ? '&' + 'amp;' : m === '<' ? '&' + 'lt;' : m === '>' ? '&' + 'gt;' : '&' + 'quot;';
+  });
 }
 
 // ── Audio playback ────────────────────────────────
@@ -639,23 +675,15 @@ function playBase64Audio(b64) {
   const binary = atob(b64);
   const bytes  = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const blob = new Blob([bytes], { type: 'audio/webm' });
+  const blob = new Blob([bytes], { type: 'audio/mpeg' });
   const url  = URL.createObjectURL(blob);
   const audio = new Audio(url);
   audio.onended = () => URL.revokeObjectURL(url);
   audio.play().catch(console.error);
 }
 
-// ── UI enable/disable ──────────────────────────────
-function setUIEnabled(enabled) {
-  $textInput.disabled = !enabled;
-  $voiceBtn.disabled  = !enabled;
-  updateSendBtn();
-}
-
 // ── Voice button icon management ───────────────────
 function setVoiceBtnIcon(mode) {
-  // mode: 'idle' | 'recording' | 'processing'
   $voiceBtn.className = mode === 'recording' ? 'recording' : mode === 'processing' ? 'processing' : '';
 
   if (mode === 'idle') {
@@ -665,7 +693,6 @@ function setVoiceBtnIcon(mode) {
     $recLabel.classList.remove('visible');
     $cancelBtn.classList.remove('visible');
   } else if (mode === 'recording') {
-    // CSS-animated bars
     $voiceBtn.innerHTML = `
       <div class="rec-bars">
         ${[0,1,2,3,4].map(i=>`<span class="rec-bar" style="--bi:${i}"></span>`).join('')}
@@ -776,6 +803,33 @@ const recorder = (() => {
   return { start, stop, cancel };
 })();
 
+// ── API call ──────────────────────────────────────
+async function callAssistant(queryContent, queryType) {
+  const res = await fetch(`${API_BASE}/api/assistant/chat`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${state.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: { content: queryContent, type: queryType },
+      history: state.history,
+      language: state.language,
+    }),
+  });
+
+  if (!res.ok) {
+    let errorMsg = `HTTP ${res.status}`;
+    try {
+      const errBody = await res.json();
+      errorMsg = errBody.message || errBody.error || errorMsg;
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  return await res.json();
+}
+
 // ── Voice button click handler ─────────────────────
 $voiceBtn.addEventListener('click', async () => {
   if (state.processing) return;
@@ -789,7 +843,7 @@ $voiceBtn.addEventListener('click', async () => {
     const base64 = await recorder.stop();
     state.processing = false;
 
-    if (base64 && state.connected) {
+    if (base64 && state.ready) {
       const msg = {
         id:        nanoid(),
         role:      'user',
@@ -801,19 +855,13 @@ $voiceBtn.addEventListener('click', async () => {
       };
       state.messages.push(msg);
       appendMessage(msg);
- 
-      socket.emit('message', {
-        content:  base64,
-        type:     'audio',
-        language: state.language,
-      });
-      showThinking();
-      state.thinking = true;
-      setUIEnabled(false);
+
+      // Send via REST API
+      await sendQuery(base64, 'audio');
     }
 
     setVoiceBtnIcon('idle');
-    if (state.connected) $voiceBtn.disabled = false;
+    if (state.ready) $voiceBtn.disabled = false;
 
   } else {
     // Start recording
@@ -831,13 +879,13 @@ $cancelBtn.addEventListener('click', e => {
   state.recording = false;
   state.processing = false;
   setVoiceBtnIcon('idle');
-  if (state.connected) $voiceBtn.disabled = false;
+  if (state.ready) $voiceBtn.disabled = false;
 });
 
 // ── Text send ─────────────────────────────────────
 function sendText() {
   const content = $textInput.value.trim();
-  if (!content || !state.connected || state.thinking) return;
+  if (!content || !state.ready || state.thinking) return;
 
   const msg = {
     id:        nanoid(),
@@ -850,116 +898,90 @@ function sendText() {
   state.messages.push(msg);
   appendMessage(msg);
 
-  socket.emit('message', {
-    content,
-    type:     'text',
-    language: state.language,
-  });
-
   $textInput.value = '';
   autoResize($textInput);
-  updateSendBtn();
-  showThinking();
-  state.thinking = true;
-  setUIEnabled(false);
+  updateUI();
+
+  sendQuery(content, 'text');
 }
 
-// ── Socket.io ─────────────────────────────────────
-const socket = io(SOCKET_URL, {
-  transports:          ['websocket'],
-
-});
-
-socket.on('connect', () => {
-  state.connected = true;
-  setStatus('connected', 'Connected');
-  setUIEnabled(true);
-  setVoiceBtnIcon('idle');
-  $voiceBtn.disabled = false;
-});
-
-socket.on('disconnect', () => {
-  state.connected = false;
-  state.thinking  = false;
-  setStatus('disconnected', 'Disconnected');
-  setUIEnabled(false);
-  removeThinking();
-});
-
-socket.on('connect_error', () => {
-  setStatus('error', 'Connection error');
-});
-
-socket.on('assistant:thinking', () => {
+// ── Shared query handler ──────────────────────────
+async function sendQuery(content, type) {
   state.thinking = true;
+  setStatus('waiting', 'Assistant is thinking…');
   showThinking();
-  setUIEnabled(false);
-});
+  updateUI();
 
-socket.on('response', payload => {
-  removeThinking();
+  try {
+    const response = await callAssistant(content, type);
+    const data = response.data;
+
+    // ── Append user message to history ──
+    state.history.push({
+      content:  type === 'audio' ? '(audio recording)' : content,
+      type:     type,
+      role:     'user',
+      language: state.language,
+    });
+
+    // ── Update history with assistant response ──
+    state.history.push({
+      content:  data.message,
+      type:     'text',
+      role:     'assistant',
+      language: state.language,
+    });
+
+    // ── Render assistant response ──
+    removeThinking();
+
+    const hasAudio = !!data.audio;
+
+    const msg = {
+      id:        nanoid(),
+      role:      'assistant',
+      type:      hasAudio ? 'audio' : 'text',
+      text:      data.message,
+      ...(hasAudio && { audioData: data.audio }),
+      language:  state.language,
+      timestamp: new Date(),
+      status:    'done',
+    };
+    state.messages.push(msg);
+    appendMessage(msg);
+
+    // Auto-play Twi audio
+    if (hasAudio && data.audio) {
+      setTimeout(() => playBase64Audio(data.audio), 300);
+    }
+
+    setStatus('ready', 'Ready');
+
+  } catch (err) {
+    removeThinking();
+    const errorMsg = {
+      id:        nanoid(),
+      role:      'assistant',
+      type:      'text',
+      text:      `⚠️ ${err.message}`,
+      language:  state.language,
+      timestamp: new Date(),
+      status:    'error',
+    };
+    state.messages.push(errorMsg);
+    appendMessage(errorMsg);
+    setStatus('error', 'Error');
+  }
+
   state.thinking = false;
-  setUIEnabled(true);
-
-  const msg = {
-    id:        nanoid(),
-    role:      'assistant',
-    type:      'text',
-    text:      payload.text,
-    toolsUsed: payload.toolsUsed,
-    language:  state.language,
-    timestamp: new Date(),
-    status:    'done',
-  };
-  state.messages.push(msg);
-  appendMessage(msg);
-});
-
-socket.on('assistant:audio', payload => {
-  removeThinking();
-  state.thinking = false;
-  setUIEnabled(true);
-
-  const msg = {
-    id:        nanoid(),
-    role:      'assistant',
-    type:      'audio',
-    text:      payload.text,
-    audioData: payload.audio,
-    language:  state.language,
-    timestamp: new Date(),
-    status:    'done',
-  };
-  state.messages.push(msg);
-  appendMessage(msg);
-
-  // Auto-play the audio response
-  playBase64Audio(payload.audio);
-});
-
-socket.on('assistant:error', payload => {
-  removeThinking();
-  state.thinking = false;
-  setUIEnabled(true);
-
-  const msg = {
-    id:        nanoid(),
-    role:      'assistant',
-    type:      'text',
-    text:      `⚠️ ${payload.message}`,
-    language:  state.language,
-    timestamp: new Date(),
-    status:    'error',
-  };
-  state.messages.push(msg);
-  appendMessage(msg);
-});
+  updateUI();
+}
 
 // ── Boot ──────────────────────────────────────────
-setStatus('connecting', 'Connecting…');
-setUIEnabled(false);
+setStatus('missing-token', 'Token required');
+updateUI();
 setVoiceBtnIcon('idle');
-$voiceBtn.innerHTML = svgUse('icon-mic'); // initial icon before connected
+$voiceBtn.innerHTML = svgUse('icon-mic');
 </script>
 </body>
 </html>

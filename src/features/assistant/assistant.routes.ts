@@ -5,6 +5,7 @@ import { asyncHandler } from "@middlewares/error-handler.middleware";
 import { QueryAgentSchema } from "@features/assistant/assistant.schema";
 import { handleAssistantChat } from "@features/assistant/assistant.service";
 import { ChatMessage, UserMessage } from "@/types/assistant";
+import { logger } from "@/lib/logger";
 
 const router = Router();
 
@@ -43,6 +44,8 @@ router.post(
 
     const result = await handleAssistantChat(userMessage, userId, history);
 
+
+    logger.debug(result.toString())
     res.json({
       status: "success",
       data: result,

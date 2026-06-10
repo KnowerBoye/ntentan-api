@@ -36,7 +36,24 @@ export interface QueryPrescriptionsInput {
   drugName?: string;
 }
 
+// ── Save Prescription ────────────────────────
+export interface SavePrescriptionInput {
+  userId: string;
+  name: string;
+  timeSlots: string[];
+  dosage: string;
+  unitsPerDose: number;
+  frequency: number;
+  strength?: string;
+  instruction?: string;
+}
 
+export interface SavePrescriptionResult {
+  id: string;
+  name: string;
+}
+
+// ── Shared tool result ───────────────────────
 export interface ToolResult<T = unknown> {
   success: boolean;
   data?: T;

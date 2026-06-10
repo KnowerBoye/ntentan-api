@@ -1,4 +1,5 @@
 import express from "express" 
+import cors from "cors"
 import dotenv from "dotenv"
 import {Server} from "socket.io"
 import {createServer} from "http"
@@ -14,7 +15,8 @@ const app = express()
 const server = createServer(app)
 
 // ── Express global middleware ─────────────────
-app.use(express.json());
+app.use(cors({ origin: "*" }));
+app.use(express.json({ limit: "10mb" }));
 
 // ── Socket.IO setup ──────────────────────────
 const io = new Server(server)

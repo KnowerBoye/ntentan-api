@@ -1,11 +1,12 @@
 import { GoogleGenAI, Content, FunctionCall } from "@google/genai";
 import { tools } from "@features/assistant/assistant.tools";
-import { queryPrescriptions } from "@features/assistant/prescription.tools";
+import { queryPrescriptions, savePrescription } from "@features/assistant/prescription.tools";
 import { searchDrugInfo } from "@features/assistant/drugInfo.tools";
 import {
   ChatMessage,
   AssistantResponse,
   QueryPrescriptionsInput,
+  SavePrescriptionInput,
   SearchDrugInfoInput,
   UserMessage as UserMessage,
 } from "@/types/assistant";
@@ -46,6 +47,14 @@ Use these windows to determine what the user should take next.
 - Include special instructions if present.
 - Keep responses warm, concise, and clear.
 
+## Saving Prescriptions
+- You can save a new prescription to the user's records using the save_prescription tool.
+- Required fields: name, timeSlots, dosage, unitsPerDose, frequency
+- Optional fields: strength, instruction
+- If the user asks to save a prescription but some required fields are missing, ask follow-up questions ONE AT A TIME until you have all required information before calling the tool.
+- After saving, confirm the details with the user and show them what was saved.
+- If a medication with the same name already exists, ask the user if they want to update the existing one instead of creating a duplicate.
+
 ## Hard Safety Rules
 1. You are NOT a doctor. Never diagnose, prescribe, or recommend treatments.
 2. Never suggest stopping or changing a prescribed dosage.
@@ -75,6 +84,20 @@ async function dispatchTool(
       result: await searchDrugInfo(args as SearchDrugInfoInput),
       isSearch: true,
     };
+  }
+
+  if (call.name === "save_prescription") {
+    const input: SavePrescriptionInput = {
+      userId,
+      name: args.name as string,
+      timeSlots: args.timeSlots as string[],
+      dosage: args.dosage as string,
+      unitsPerDose: args.unitsPerDose as number,
+      frequency: args.frequency as number,
+      strength: args.strength as string | undefined,
+      instruction: args.instruction as string | undefined,
+    };
+    return { result: await savePrescription(input), isSearch: false };
   }
 
   return {
@@ -111,16 +134,8 @@ export class MedicalAssistant {
     const contents: Content[] = [
     ...history.map((m): Content => ({
       role: m.role === "assistant" ? "model" : "user",
-      parts:  m.type == "audio" ? 
-      [
-        {
-          inlineData : {
-            mimeType : "audio/wav" , 
-            data : m.content
-          }
-        }
-      ] : [{
-        text : m.content
+      parts: [{
+        text: m.type === "audio" ? "[User sent an audio message]" : m.content
       }]
     })),
     {

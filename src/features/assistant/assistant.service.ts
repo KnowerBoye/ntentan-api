@@ -1,6 +1,6 @@
-import { ChatMessage, UserMessage } from "@/types/assistant";
+import { ChatMessage, UserMessage, SupportedLanguage } from "@/types/assistant";
 import { MedicalAssistant } from "@features/assistant/assistant";
-import { handleTwiAudio, twiToEnglish } from "./voice.service";
+import { handleTwiAudio, twiToEnglish, englishToTwi, twiTTS } from "./voice.service";
 import { logger } from "@/lib/logger";
 import dotenv from "dotenv"
 
@@ -19,9 +19,8 @@ export async function handleAssistantChat(
   history: ChatMessage[]
 ): Promise<{
   message: string;
-  toolsUsed: string[];
-  sources?: string[];
   history: ChatMessage[];
+  audio?: string;
 }> {
   const assistant = new MedicalAssistant(process.env.GEMINI_API_KEY || "");
 
@@ -54,7 +53,18 @@ export async function handleAssistantChat(
   // ── 2. Get response from Gemini ──
   const response = await assistant.chat(preparedQuery, userId, history);
 
-  // ── 3. Build updated history ──
+  // ── 3. Translate response to Twi if original query was in Twi ──
+  let finalMessage = response.message;
+  let responseLanguage: SupportedLanguage = "english";
+  let audioBuffer: Buffer | undefined;
+
+  if (query.language === "twi") {
+    finalMessage = await englishToTwi(response.message);
+    responseLanguage = "twi";
+    audioBuffer = await twiTTS(finalMessage);
+  }
+
+  // ── 4. Build updated history ──
   const updatedHistory: ChatMessage[] = [
     ...history,
     {
@@ -62,17 +72,16 @@ export async function handleAssistantChat(
       role: "user",
     },
     {
-      content: response.message,
+      content: finalMessage,
       role: "assistant",
-      language: "english",
+      language: responseLanguage,
       type: "text",
     },
   ];
 
   return {
-    message: response.message,
-    toolsUsed: response.toolsUsed,
-    sources: response.sources,
+    message: finalMessage,
     history: updatedHistory,
+    ...(audioBuffer && { audio: audioBuffer.toString("base64") }),
   };
 }

@@ -30,7 +30,10 @@ export async function authMiddleware(
       return next(new UnauthorizedError("Authentication required: no token provided"));
     }
 
-    const token = authHeader.slice(7); // Remove "Bearer "
+    const token = authHeader.split(" ")[1].trim(); 
+
+    console.log(token)
+
 
     // 2. Verify the Firebase ID token
     const decoded = await admin.getAuth().verifyIdToken(token);
