@@ -61,7 +61,7 @@ jobs:
             --allow-unauthenticated \
             --update-env-vars="$ENV_VARS" \
             --service-account="$SERVICE_ACCOUNT" \
-            --update-secrets=/usr/src/ntentan-api/secrets/firebase_cred.json=NTENTAN_FIREBASE_CREDENTIALS:latest \
+            --update-secrets=/usr/src/ntentan-api/secrets/firebase-cred.json=NTENTAN_FIREBASE_CREDENTIALS:latest \
             --timeout=900s \
 
           
