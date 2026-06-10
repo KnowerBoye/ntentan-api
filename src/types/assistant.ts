@@ -25,23 +25,14 @@ export const TIME_WINDOWS: Record<string, { label: string; start: string; end: s
 
 // ── Query intent Gemini resolves ─────────────
 export type QueryIntent =
-  | "today"        // what do I take today?
-  | "on_date"      // what did/do I take on a specific date?
-  | "next"         // when is my next dose of X?
-  | "last"         // when was my last dose of X?
-  | "check"        // did I take X on date Y?
-  | "all_active";  // list all active prescriptions
+  | "next"             // what medication should I take next (based on current time vs time slots)?
+  | "medication_info"  // find a specific medication and return its details (instruction, timeSlots, etc.)
+  | "all_active";      // list all my prescriptions
 
 export interface QueryPrescriptionsInput {
   userId: string;
   intent: QueryIntent;
-  /**
-   * Resolved target date in YYYY-MM-DD format.
-   * Gemini resolves relative terms ("today", "yesterday", "tomorrow")
-   * to an absolute date using the currentDate injected in the system prompt.
-   */
-  targetDate?: string;
-  /** Drug name filter – used for next/last/check/on_date queries */
+  /** Drug name to filter by (uses semantic vector search) */
   drugName?: string;
 }
 
@@ -54,9 +45,7 @@ export interface ToolResult<T = unknown> {
 
 export interface PrescriptionQueryResult {
   intent: QueryIntent;
-  targetDate?: string;
   prescriptions: Prescription[];
-
   contextNote: string;
 }
 

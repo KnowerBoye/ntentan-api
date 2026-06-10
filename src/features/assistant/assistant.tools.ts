@@ -3,49 +3,39 @@ import { Tool, Type } from "@google/genai";
 export const tools: Tool[] = [
   {
     functionDeclarations: [
-      // ── 1. Unified prescription query ──────────
+      // ── Unified medication query ──────────
       {
         name: "query_prescriptions",
-        description: `Query the user's prescription records. Use this for ANY question about the user's personal medications.
+        description: `Query the user's medication records. Use this for ANY question about the user's personal medications.
 
-Resolve all relative date references to YYYY-MM-DD using the currentDate provided in the system prompt before calling this tool.
-
-Drug name matching uses semantic (vector) search — you can use brand names, generic names, or partial descriptions. For example "artemether" will match "Lufart DS".
+Drug name matching uses semantic (vector) search — you can use brand names, generic names, or partial descriptions. For example "artemether" will match "Lufart DS", "panadol" will match "Paracetamol".
 
 Intent mapping:
-- "today"      → what medications do I take today? (use targetDate = currentDate)
-- "on_date"    → what did I take on [date]? (use targetDate = resolved date)
-- "next"       → when is my next dose of X? (use drugName)
-- "last"       → when was my last dose of X? (use drugName)
-- "check"      → did I take X yesterday/on [date]? (use drugName + targetDate)
-- "all_active" → list all my prescriptions
+- "next"            → what medication should I take next? Determines the next time slot (morning/afternoon/evening) based on the current time. Optionally filter by drugName.
+- "medication_info" → find a specific medication and return its full details (dosage, time slots, instructions). drugName is REQUIRED.
+- "all_active"      → list all active prescriptions. Optionally filter by drugName.
 
 Examples:
-  "What do I take today?"              → intent="today", targetDate=currentDate
-  "What did I take yesterday?"         → intent="on_date", targetDate=yesterday
-  "When is my next paracetamol?"       → intent="next", drugName="paracetamol"
-  "When was my last paracetamol?"      → intent="last", drugName="paracetamol"
-  "Did I take paracetamol yesterday?"  → intent="check", drugName="paracetamol", targetDate=yesterday
-  "Do I take paracetamol today?"       → intent="check", drugName="paracetamol", targetDate=currentDate
-  "Show all my prescriptions"          → intent="all_active"`,
+  "What should I take next?"                                  → intent="next"
+  "When is my next paracetamol?"                              → intent="next", drugName="paracetamol"
+  "Tell me about my paracetamol prescription"                 → intent="medication_info", drugName="paracetamol"
+  "What are the instructions for amoxicillin?"                → intent="medication_info", drugName="amoxicillin"
+  "Show all my medications"                                   → intent="all_active"
+  "What medications do I have?"                               → intent="all_active"
+  "What heart medications do I have?"                         → intent="all_active", drugName="heart"`,
 
         parameters: {
           type: Type.OBJECT,
           properties: {
             intent: {
               type: Type.STRING,
-              enum: ["today", "on_date", "next", "last", "check", "all_active"],
+              enum: ["next", "medication_info", "all_active"],
               description: "The query intent (see description above)",
-            },
-            targetDate: {
-              type: Type.STRING,
-              description:
-                "Resolved date in YYYY-MM-DD format. Required for: today, on_date, check. Optional for others.",
             },
             drugName: {
               type: Type.STRING,
               description:
-                "Drug name to filter by (uses semantic vector search). Required for: next, last, check. Optional for: today, on_date, all_active.",
+                "Drug name to filter by (uses semantic vector search). Optional for 'next' and 'all_active', but REQUIRED for 'medication_info'.",
             },
           },
           required: ["intent"],

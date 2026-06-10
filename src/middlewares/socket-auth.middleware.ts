@@ -35,10 +35,13 @@ export async function socketAuthMiddleware(
   next: (err?: Error) => void
 ): Promise<void> {
   try {
+
     // 1. Extract token from handshake auth or query string
     const token =
       socket.handshake.auth?.token ??
       (socket.handshake.query?.token as string | undefined);
+
+
 
     if (!token) {
       logger.warn("Socket auth rejected: no token provided", {
@@ -50,6 +53,8 @@ export async function socketAuthMiddleware(
     // 2. Verify the Firebase ID token
     const decoded = await admin.getAuth().verifyIdToken(token);
 
+
+
     // 3. Attach verified user to the socket
     socket.user = {
       uid: decoded.uid,
@@ -59,10 +64,10 @@ export async function socketAuthMiddleware(
       picture: decoded.picture,
     };
 
-    logger.info("Socket authenticated", {
-      socketId: socket.id,
-      uid: decoded.uid,
-    });
+    // logger.info("Socket authenticated", {
+    //   socketId: socket.id,
+    //   uid: decoded.uid,
+    // });
 
     next();
   } catch (err: unknown) {

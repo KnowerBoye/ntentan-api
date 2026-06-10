@@ -19,8 +19,8 @@ app.use(express.json());
 // ── Socket.IO setup ──────────────────────────
 const io = new Server(server)
 
-// Apply Firebase JWT auth to all WebSocket namespaces
-io.use(socketAuthMiddleware);
+// Apply Firebase JWT auth to the med-scanner namespace
+io.of("/med-scanner").use(socketAuthMiddleware);
 
 io.of("/med-scanner").on("connection" , handleVideoStreamConnection)
 

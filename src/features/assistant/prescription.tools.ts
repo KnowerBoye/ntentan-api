@@ -1,13 +1,9 @@
 // ─────────────────────────────────────────────
 import { getFirestore } from "@/lib/firebase";
 import {
-  isPrescriptionActiveOnDate,
-  getNextDoseDateTime,
-  getLastDoseDateTime,
-  displayDate,
   displayTime,
   displayTimeSlots,
-  todayISO,
+  getNextDose,
 } from "@/lib/DateHelpers";
 import {
   Prescription,
@@ -55,14 +51,9 @@ function cosineSimilarity(a: number[], b: number[]): number {
 // ── Matchers ──────────────────────────────────
 
 /**
- * Match medications by drug name.
- *
- * Strategy:
- * 1. If a drugName is provided, embed it via Vertex AI and compute
- *    cosine similarity against each medication's `name_embedding` vector.
- *    Return medications with similarity above a threshold (sorted best-first).
- * 2. Fall back to simple substring matching if vectors are unavailable.
- * 3. If no drugName, return all medications.
+ * Match medications by drug name using semantic vector search.
+ * Falls back to substring matching if vectors are unavailable.
+ * If no drugName is provided, returns all medications.
  */
 async function matchDrugs(
   all: Prescription[],
@@ -81,7 +72,6 @@ async function matchDrugs(
       .filter((p) => p.name_embedding && Array.isArray(p.name_embedding))
       .map((p) => ({
         prescription: p,
-        // Firestore VectorValue is a Float32Array, convert to regular array
         similarity: cosineSimilarity(
           queryVector,
           Array.from((p.name_embedding as unknown) as Float32Array)
@@ -94,7 +84,6 @@ async function matchDrugs(
       return scored.map(({ prescription }) => prescription);
     }
 
-    // Vector search returned nothing — fall through to substring
     logger.debug("Vector search returned no results, falling back to substring match", {
       drugName,
     });
@@ -117,119 +106,61 @@ export async function queryPrescriptions(
   input: QueryPrescriptionsInput
 ): Promise<ToolResult<PrescriptionQueryResult>> {
   try {
-    const { userId, intent, targetDate, drugName } = input;
-    const today = todayISO();
+    const { userId, intent, drugName } = input;
     const all = await fetchAll(userId);
 
     let prescriptions: Prescription[] = [];
     let contextNote = "";
 
     switch (intent) {
-      case "today": {
-        const date = targetDate ?? today;
-        const matched = drugName ? await matchDrugs(all, drugName) : all;
-        prescriptions = matched.filter((p) => isPrescriptionActiveOnDate(p, date));
-
-        if (prescriptions.length) {
-          const details = prescriptions
-            .map(
-              (p) =>
-                `${p.name} ${p.strength} — ${p.unitsPerDose} ${p.dosage} — ${displayTimeSlots(p.timeSlots)}` +
-                (p.instruction ? ` (${p.instruction})` : "")
-            )
-            .join("\n");
-          contextNote = `Found ${prescriptions.length} medication(s) scheduled for ${displayDate(date)}:\n${details}`;
-        } else {
-          contextNote = `No medications are scheduled for ${displayDate(date)}.`;
-        }
-        break;
-      }
-
-      case "on_date": {
-        const date = targetDate ?? today;
-        const matched = drugName ? await matchDrugs(all, drugName) : all;
-        prescriptions = matched.filter((p) => isPrescriptionActiveOnDate(p, date));
-
-        const isPast = date < today;
-        if (prescriptions.length) {
-          const details = prescriptions
-            .map(
-              (p) =>
-                `${p.name} ${p.strength} — ${p.unitsPerDose} ${p.dosage} — ${displayTimeSlots(p.timeSlots)}` +
-                (p.instruction ? ` (${p.instruction})` : "")
-            )
-            .join("\n");
-          contextNote = `Found ${prescriptions.length} medication(s) ${isPast ? "that were" : "scheduled to be"} taken on ${displayDate(date)}:\n${details}`;
-        } else {
-          contextNote = `No medications ${isPast ? "were" : "are"} scheduled for ${displayDate(date)}.`;
-        }
-        break;
-      }
-
       case "next": {
         const matched = drugName ? await matchDrugs(all, drugName) : all;
-        const withNext = matched
-          .map((p) => ({ p, next: getNextDoseDateTime(p) }))
-          .filter((x) => x.next !== null)
-          .sort((a, b) => {
-            if (a.next!.date !== b.next!.date)
-              return a.next!.date.localeCompare(b.next!.date);
-            const order: Record<string, number> = { morning: 0, afternoon: 1, evening: 2 };
-            return (order[a.next!.time] ?? 99) - (order[b.next!.time] ?? 99);
-          });
 
-        if (!withNext.length) {
+        if (matched.length === 0) {
           contextNote = drugName
-            ? `No upcoming doses found for "${drugName}".`
-            : "No upcoming doses found.";
-        } else {
-          const { p, next } = withNext[0];
-          contextNote = `Next dose of ${p.name} ${p.strength}: ${displayTime(next!.time)} on ${displayDate(next!.date)}.`;
-          prescriptions = [p];
+            ? `No medications found matching "${drugName}".`
+            : "No medications found on record.";
+          break;
         }
+
+        const next = getNextDose(matched);
+
+        if (!next) {
+          contextNote = "All medication slots have passed for today. The next doses will be tomorrow.";
+          break;
+        }
+
+        const { prescription: p, slot } = next;
+        contextNote = `Next medication: ${p.name} ${p.strength} — ${p.unitsPerDose} ${p.dosage} — ${displayTime(slot)}.` +
+          (p.instruction ? ` Instructions: ${p.instruction}` : "");
+        prescriptions = [p];
         break;
       }
 
-      case "last": {
-        const matched = drugName ? await matchDrugs(all, drugName) : all;
-        const withLast = matched
-          .map((p) => ({ p, last: getLastDoseDateTime(p) }))
-          .filter((x) => x.last !== null)
-          .sort((a, b) => {
-            if (a.last!.date !== b.last!.date)
-              return b.last!.date.localeCompare(a.last!.date);
-            const order: Record<string, number> = { morning: 0, afternoon: 1, evening: 2 };
-            return (order[b.last!.time] ?? 99) - (order[a.last!.time] ?? 99);
-          });
-
-        if (!withLast.length) {
-          contextNote = drugName
-            ? `No past dose history found for "${drugName}".`
-            : "No past dose history found.";
-        } else {
-          const { p, last } = withLast[0];
-          contextNote = `Last dose of ${p.name} ${p.strength}: ${displayTime(last!.time)} on ${displayDate(last!.date)}.`;
-          prescriptions = [p];
+      case "medication_info": {
+        if (!drugName) {
+          return { success: false, error: "drugName is required for medication_info intent." };
         }
-        break;
-      }
 
-      case "check": {
-        const date = targetDate ?? today;
-        const matched = drugName ? await matchDrugs(all, drugName) : all;
-        prescriptions = matched.filter((p) => isPrescriptionActiveOnDate(p, date));
+        const matched = await matchDrugs(all, drugName);
 
-        const isPast = date <= today;
-        if (prescriptions.length) {
-          const slotSummary = prescriptions
-            .map((p) => `${p.name} — ${displayTimeSlots(p.timeSlots)}`)
-            .join("; ");
-          contextNote = isPast
-            ? `Yes – ${drugName ?? "this medication"} was scheduled for ${displayDate(date)}: ${slotSummary}.`
-            : `${drugName ?? "This medication"} is scheduled for ${displayDate(date)}: ${slotSummary}.`;
-        } else {
-          contextNote = `No prescription for ${drugName ?? "that medication"} was found on ${displayDate(date)}.`;
+        if (matched.length === 0) {
+          contextNote = `No medication found matching "${drugName}".`;
+          break;
         }
+
+        prescriptions = matched;
+        const details = matched
+          .map(
+            (p) =>
+              `${p.name} ${p.strength}\n` +
+              `  Dosage: ${p.unitsPerDose} ${p.dosage}\n` +
+              `  Times: ${displayTimeSlots(p.timeSlots)}\n` +
+              `  Frequency: ${p.frequency} time(s) per day\n` +
+              (p.instruction ? `  Instructions: ${p.instruction}\n` : "")
+          )
+          .join("\n");
+        contextNote = `Found ${matched.length} medication(s):\n${details}`;
         break;
       }
 
@@ -237,17 +168,19 @@ export async function queryPrescriptions(
         const matched = drugName ? await matchDrugs(all, drugName) : all;
         prescriptions = matched;
 
-        if (prescriptions.length) {
-          const details = prescriptions
+        if (matched.length === 0) {
+          contextNote = drugName
+            ? `No medications found matching "${drugName}".`
+            : "No prescriptions found on record.";
+        } else {
+          const details = matched
             .map(
               (p) =>
                 `${p.name} ${p.strength} — ${p.unitsPerDose} ${p.dosage} — ${displayTimeSlots(p.timeSlots)}` +
                 (p.instruction ? ` (${p.instruction})` : "")
             )
             .join("\n");
-          contextNote = `Found ${prescriptions.length} prescription(s) on record:\n${details}`;
-        } else {
-          contextNote = "No prescriptions found on record.";
+          contextNote = `Found ${matched.length} prescription(s):\n${details}`;
         }
         break;
       }
@@ -260,7 +193,6 @@ export async function queryPrescriptions(
       success: true,
       data: {
         intent,
-        targetDate,
         prescriptions,
         contextNote,
       },

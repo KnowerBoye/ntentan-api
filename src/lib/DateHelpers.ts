@@ -1,19 +1,9 @@
-import { format, parseISO, addDays, subDays } from "date-fns";
+import { format } from "date-fns";
 import { Prescription, TIME_WINDOWS } from "@/types/assistant";
-
-/** Today as YYYY-MM-DD */
-export function todayISO(): string {
-  return format(new Date(), "yyyy-MM-dd");
-}
 
 /** Current time as HH:mm */
 export function nowHHMM(): string {
   return format(new Date(), "HH:mm");
-}
-
-/** Format a YYYY-MM-DD string for display */
-export function displayDate(iso: string): string {
-  return format(parseISO(iso), "EEEE, MMMM d, yyyy");
 }
 
 /** Format a time-of-day slot ID for display (e.g. "morning" → "Morning (06:00–12:00)") */
@@ -29,89 +19,47 @@ export function displayTimeSlots(slots: string[]): string {
 }
 
 /**
- * Build a canonical slot key from a date and slot ID.
- * e.g. "2026-06-09" + "morning" → "2026-06-09_morning"
+ * Determine the slot order for sorting.
  */
-export function slotKey(date: string, slot: string): string {
-  return `${date}_${slot}`;
-}
+const SLOT_ORDER: Record<string, number> = { morning: 0, afternoon: 1, evening: 2 };
 
 /**
- * Returns true if a prescription has ANY time slot on `targetDate`
- * that has NOT yet been completed.
+ * Find the next upcoming time slot across all given prescriptions,
+ * based on the current time.
  *
- * A slot is "completed" if its slotKey (YYYY-MM-DD_slotId) exists
- * in the prescription's completedSlots array.
- */
-export function isPrescriptionActiveOnDate(
-  p: Prescription,
-  targetDate: string // YYYY-MM-DD
-): boolean {
-  return p.timeSlots.some((slot) => {
-    const key = slotKey(targetDate, slot);
-    return !p.completedSlots.includes(key);
-  });
-}
-
-/**
- * For "next dose" queries: find the next upcoming date+time slot
- * for a prescription, starting from now.
+ * Returns the first prescription whose next non-completed slot
+ * is upcoming (sorted by slot order), or null if nothing is upcoming.
  *
- * Returns { date, time } or null if all slots are completed.
+ * A slot is considered "completed" for today if the current time
+ * has passed its window end.
  */
-export function getNextDoseDateTime(p: Prescription): {
-  date: string;
-  time: string;
-} | null {
-  const today = todayISO();
+export function getNextDose(
+  prescriptions: Prescription[]
+): { prescription: Prescription; slot: string } | null {
   const currentTime = nowHHMM();
 
-  // Check today's slots first
-  for (const slot of p.timeSlots) {
-    const window = TIME_WINDOWS[slot];
-    if (!window) continue;
-    const key = slotKey(today, slot);
+  const candidates: Array<{ prescription: Prescription; slot: string; order: number }> = [];
 
-    // Skip if already completed
-    if (p.completedSlots.includes(key)) continue;
+  for (const p of prescriptions) {
+    for (const slot of p.timeSlots) {
+      const window = TIME_WINDOWS[slot];
+      if (!window) continue;
 
-    // If current time is before the window ends, it's still upcoming
-    if (currentTime < window.end) {
-      return { date: today, time: slot };
+      // If the current time is before the slot window ends, it's upcoming
+      if (currentTime < window.end) {
+        candidates.push({
+          prescription: p,
+          slot,
+          order: SLOT_ORDER[slot] ?? 99,
+        });
+      }
     }
   }
 
-  // All today's slots passed or completed → look at tomorrow
-  // (We assume daily recurrence — every day the prescription is active
-  //  unless all future slots on record are completed. For MVP, return
-  //  the first slot tomorrow.)
-  const tomorrow = format(addDays(parseISO(today), 1), "yyyy-MM-dd");
-  for (const slot of p.timeSlots) {
-    const key = slotKey(tomorrow, slot);
-    if (!p.completedSlots.includes(key)) {
-      return { date: tomorrow, time: slot };
-    }
-  }
+  if (!candidates.length) return null;
 
-  // All slots completed for today and tomorrow — no upcoming
-  return null;
-}
+  // Sort by slot order (morning → afternoon → evening)
+  candidates.sort((a, b) => a.order - b.order);
 
-/**
- * For "last dose" queries: find the most recent completed dose.
- *
- * Searches completedSlots and returns the most recent one chronologically.
- */
-export function getLastDoseDateTime(p: Prescription): {
-  date: string;
-  time: string;
-} | null {
-  if (!p.completedSlots.length) return null;
-
-  // Parse slot keys like "2026-06-09_morning" → sort descending
-  const sorted = [...p.completedSlots].sort().reverse();
-  const lastKey = sorted[0];
-  const [date, time] = lastKey.split("_");
-
-  return { date, time };
+  return { prescription: candidates[0].prescription, slot: candidates[0].slot };
 }

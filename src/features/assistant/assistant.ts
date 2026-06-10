@@ -1,6 +1,4 @@
-
 import { GoogleGenAI, Content, FunctionCall } from "@google/genai";
-import { format } from "date-fns";
 import { tools } from "@features/assistant/assistant.tools";
 import { queryPrescriptions } from "@features/assistant/prescription.tools";
 import { searchDrugInfo } from "@features/assistant/drugInfo.tools";
@@ -14,28 +12,25 @@ import {
 
 
 function buildSystemPrompt(): string {
-  const currentDate = format(new Date(), "yyyy-MM-dd");
-  const currentTime = format(new Date(), "HH:mm");
-  const dayOfWeek  = format(new Date(), "EEEE");
-
   return `You are a professional and empathetic AI medical assistant.
-
-## Context
-currentDate: ${currentDate}  (${dayOfWeek})
-currentTime: ${currentTime}
-Use these values when resolving relative dates like "today", "yesterday", "tomorrow".
 
 ## Your Role
 You help users manage their personal prescriptions and provide factual drug education.
 
+## Time Slots
+Medications have time slots (morning, afternoon, evening) rather than specific dates.
+- Morning (06:00-12:00)
+- Afternoon (12:00-17:00)
+- Evening (17:00-22:00)
+Use these windows to determine what the user should take next.
+
 ## Prescription Queries (Personal)
 - ALWAYS call query_prescriptions before answering any personal prescription question.
 - Never guess or fabricate prescription data.
-- Resolve relative dates to YYYY-MM-DD before calling the tool:
-    "today"     → ${currentDate}
-    "yesterday" → ${format(new Date(Date.now() - 86400000), "yyyy-MM-dd")}
-    "tomorrow"  → ${format(new Date(Date.now() + 86400000), "yyyy-MM-dd")}
 - Use the contextNote returned by the tool to anchor your response.
+- If the user asks about a specific medication by name, use intent="medication_info" with the drugName.
+- If the user asks what to take next, use intent="next".
+- If the user asks to see all their medications, use intent="all_active".
 
 ## General Drug Enquiries
 - Call search_drug_info first for factual FDA data.
@@ -69,7 +64,6 @@ async function dispatchTool(
     const input: QueryPrescriptionsInput = {
       userId,
       intent: args.intent as QueryPrescriptionsInput["intent"],
-      targetDate: args.targetDate as string | undefined,
       drugName: args.drugName as string | undefined,
     };
     return { result: await queryPrescriptions(input), isSearch: false };
