@@ -12,7 +12,7 @@ RUN npm ci --only=production
 COPY --from=builder /usr/src/ntentan-api/dist ./dist
 
 # Set environment variables
-ENV FIREBASE_CREDENTIALS=/usr/src/ntentan-api/secrets/firebase_cred.json \
+ENV FIREBASE_CREDENTIALS=/usr/src/ntentan-api/secrets/firebase-cred.json \
     NODE_ENV=PRODUCTION 
 
 EXPOSE 8080
