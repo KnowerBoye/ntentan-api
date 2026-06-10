@@ -17,7 +17,7 @@ export interface MedicationLabelFields {
 // ── Medication Document (Firestore) ───────────────────────────────────
 
 export interface Medication {
-  completedSlots: string[];
+  completedSlots: Record<string, string>;
   composite_string: string;
   createdAt: string;
   dosage: string;
@@ -91,7 +91,7 @@ const positioningInstructionSchema = z.enum([
 
 const prescriptionMatchSchema = z.object({
   medication: z.object({
-    completedSlots: z.array(z.string()),
+    completedSlots: z.record(z.string(), z.string()),
     composite_string: z.string(),
     createdAt: z.string(),
     dosage: z.string(),
@@ -152,6 +152,7 @@ export function emitMedScannerResponse(
   response: MedScannerResponse,
 ): boolean {
   // Validate at runtime — catch contract violations immediately
+  console.log(response)
   const parsed = medScannerResponseSchema.parse(response);
 
   // Serialise consistently (the current code has mixed raw/stringified emits)

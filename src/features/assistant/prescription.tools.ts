@@ -133,7 +133,7 @@ export async function savePrescription(
       frequency,
       strength: strength ?? "",
       instruction: instruction ?? "",
-      completedSlots: [],
+      completedSlots: {},
       composite_string: `${name} ${strength ?? ""} ${dosage}`.trim(),
       createdAt: now,
       updatedAt: now,

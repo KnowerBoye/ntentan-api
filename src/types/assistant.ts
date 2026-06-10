@@ -2,7 +2,7 @@ import type { VectorValue } from "@google-cloud/firestore";
 
 export interface Prescription {
   id: string;
-  completedSlots: string[];          // e.g. ["2026-06-09_morning", "2026-06-09_afternoon"]
+  completedSlots: Record<string, string>; // slot name → timestamp
   composite_string: string;          // enriched text for semantic search
   createdAt: string;
   dosage: string;                    // e.g. "2 tablets"

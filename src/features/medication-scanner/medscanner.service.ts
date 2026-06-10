@@ -159,6 +159,7 @@ export function handleVideoStreamConnection(clientWs :Socket){
         })),
         ];
 
+
         const response = await ai.models.generateContent({
         model: "models/gemini-2.5-flash",
         contents: [{ role: "user", parts }],
@@ -225,6 +226,9 @@ export function handleVideoStreamConnection(clientWs :Socket){
         }
     } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
+
+
+        console.log(err)
 
         logger.error("Gemini error in med-scanner", {
           socketId: clientWs.id,

@@ -117,7 +117,7 @@ describe("MedScanner WebSocket Response Schema", () => {
 
   describe("success", () => {
     const validMedication = {
-      completedSlots: ["slot1"],
+      completedSlots: { "morning": "2026-06-10T08:00:00Z" },
       composite_string: "paracetamol 500mg",
       createdAt: "2024-01-01T00:00:00Z",
       dosage: "500mg",
@@ -236,7 +236,7 @@ describe("MedScanner WebSocket Response Schema", () => {
         guidance_text: "Done.",
         prescription_match: {
           medication: {
-            completedSlots: [],
+            completedSlots: {},
             composite_string: "test",
             createdAt: "2024-01-01T00:00:00Z",
             dosage: "500mg",
