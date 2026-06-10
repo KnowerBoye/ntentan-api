@@ -87,8 +87,22 @@ async function buildCompositeString(name, dosage) {
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash", // Fast, low-latency analog to Haiku
     contents: [
-      `Medication name: ${name}\nDosage: ${dosage}\n\n` +
-      `Build an enriched composite string for semantic search embedding.`,
+      `Medication name: ${name}
+        Dosage: ${dosage}
+
+        Generate a concise, information-rich composite text optimized for semantic search embeddings.
+
+        Requirements:
+        - Include the medication name and dosage exactly as provided.
+        - Normalize and expand dosage expressions and common medical abbreviations when possible.
+        - Include the generic medication name, active ingredient(s), formulation, when known or inferable.
+        - Include the pharmacologic class and therapeutic category.
+        - Include common indications, conditions treated, and typical clinical use cases.
+        - Include relevant synonyms, alternate spellings, and recognized medical terminology.
+        - Preserve clinically important distinctions between strengths, formulations, and routes.
+        - Do not include brand names, marketing terms, unsupported assumptions, or explanatory commentary.
+        - Output a single natural-language paragraph optimized for vector embeddings and semantic retrieval.
+        `,
     ],
     config: {
       // Direct structured extraction via response schema configuration

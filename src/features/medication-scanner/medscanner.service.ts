@@ -400,7 +400,7 @@ const TOP_N = 5;
 // Distance threshold — Firestore uses DOT_PRODUCT by default with
 // text-embedding-004 (normalised vectors), so distance is in [0, 1].
 // Below this value = good match; above = likely unrelated.
-const DISTANCE_THRESHOLD = 0.15;
+const DISTANCE_THRESHOLD = 0.3;
 
 
 
