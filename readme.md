@@ -595,6 +595,154 @@ curl -X POST https://your-server.com/api/assistant/chat \
 
 ---
 
+## 🆘 Medical Alert (REST API)
+
+The medical alert endpoint sends an **emergency SMS alert** with a Google Maps location link to all emergency contacts configured for the authenticated user's profile.
+
+### **Endpoint**
+
+```
+POST /api/medical-alert/send
+```
+
+### **Headers**
+
+| Header | Value | Required |
+| :----- | :---- | :------- |
+| `Authorization` | `Bearer <FIREBASE_ID_TOKEN>` | ✅ Yes |
+| `Content-Type` | `application/json` | ✅ Yes |
+
+### **Workflow**
+
+```
+┌──────────┐   POST /api/medical-alert/send  ┌──────────────────┐   JSON response    ┌──────────┐
+│  Client  │ ─── { latitude, longitude } ───→ │  Medical Alert   │ ─── { result }   → │  Client  │
+│          │                                   │  (mNotify SMS)   │                   │          │
+└──────────┘                                   └──────────────────┘                   └──────────┘
+```
+
+1. **Authenticate**: Attach Firebase JWT token as `Authorization: Bearer <token>`.
+2. **Send**: `POST /api/medical-alert/send` with the user's current GPS coordinates.
+3. **Fetch contacts**: The server retrieves the user's `emergencyConfig.contacts` from Firestore.
+4. **Send SMS**: An SMS is sent via the **mNotify API** to each emergency contact, containing:
+   - The user's name
+   - A Google Maps link to the user's current location
+   - An urgent call to action
+5. **Response**: The server returns a per-contact delivery status.
+
+### **Request Body**
+
+```json
+{
+  "latitude": 5.6037,
+  "longitude": -0.1870
+}
+```
+
+| Field | Type | Constraints | Description |
+| :---- | :--- | :---------- | :---------- |
+| `latitude` | `number` | `-90` to `90` | GPS latitude coordinate |
+| `longitude` | `number` | `-180` to `180` | GPS longitude coordinate |
+
+### **Response Schema**
+
+**Status:** `200 OK`
+
+```json
+{
+  "status": "success",
+  "data": {
+    "notified_contacts": [
+      {
+        "name": "Jane Doe",
+        "phoneNumber": "+233501234567",
+        "success": true
+      },
+      {
+        "name": "John Smith",
+        "phoneNumber": "+233501234568",
+        "success": true
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Description |
+| :---- | :--- | :---------- |
+| `status` | `string` | Always `"success"` |
+| `data` | `object` | The response payload |
+| `data.notified_contacts` | `array` | Array of per-contact delivery results |
+| `notified_contacts[].name` | `string` | Contact's name |
+| `notified_contacts[].phoneNumber` | `string` | Contact's phone number |
+| `notified_contacts[].success` | `boolean` | Whether the SMS was sent successfully |
+
+### **Error Responses**
+
+| Status | Condition |
+| :----- | :-------- |
+| `400` | Invalid latitude/longitude values |
+| `401` | Missing or invalid Firebase JWT token |
+| `404` | User not found in Firestore |
+| `409` | No emergency contacts configured |
+
+### **Example: JavaScript (Fetch API)**
+
+```javascript
+const API_BASE = "https://your-server.com";
+
+async function sendMedicalAlert(firebaseToken, latitude, longitude) {
+  const res = await fetch(`${API_BASE}/api/medical-alert/send`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${firebaseToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ latitude, longitude }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Medical alert error: ${res.status} ${res.statusText}`);
+  }
+
+  const json = await res.json();
+  return json.data;
+}
+
+// ── Usage ────────────────────────────────────────────────────
+sendMedicalAlert("<FIREBASE_ID_TOKEN>", 5.6037, -0.1870)
+  .then((data) => {
+    console.log("Contacts notified:", data.notified_contacts.length);
+    data.notified_contacts.forEach((c) => {
+      console.log(`${c.name} (${c.phoneNumber}): ${c.success ? "✅" : "❌"}`);
+    });
+  })
+  .catch(console.error);
+```
+
+### **Example: cURL**
+
+```bash
+curl -X POST https://your-server.com/api/medical-alert/send \
+  -H "Authorization: Bearer <FIREBASE_ID_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "latitude": 5.6037,
+    "longitude": -0.1870
+  }'
+```
+
+### **Required Environment Variables**
+
+The medical alert feature requires an additional environment variable beyond the shared ones listed in the next section:
+
+| Variable | Description |
+| :------- | :---------- |
+| `MNOTIFY_API_KEY` | API key for the mNotify SMS gateway |
+| `MNOTIFY_SENDER_ID` | (Optional) SMS sender name (defaults to `"Ntentan"`) |
+
+---
+
 ## 🛠️ Environment Variables
 
 Create a `.env` file in the project root:
@@ -635,6 +783,10 @@ src/
 ├── features/
 │   ├── medication-scanner/
 │   │   └── medscanner.service.ts       # MedScanner WebSocket handler, Gemini inference, vector search
+│   ├── medical-alert/
+│   │   ├── medical-alert.routes.ts      # Express routes for POST /api/medical-alert/send
+│   │   ├── medical-alert.schema.ts      # Zod validation schemas for the alert endpoint
+│   │   └── medical-alert.service.ts     # Emergency SMS dispatch via mNotify API
 │   └── assistant/
 │       ├── assistant.routes.ts          # Express routes for POST /api/assistant/chat
 │       ├── assistant.service.ts         # Assistant request handler (HTTP)

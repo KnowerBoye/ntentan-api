@@ -7,6 +7,7 @@ import {handleVideoStreamConnection} from "@features/medication-scanner/medscann
 import { socketAuthMiddleware } from "@middlewares/socket-auth.middleware";
 import { globalErrorHandler, notFoundHandler } from "@middlewares/error-handler.middleware";
 import assistantRoutes from "@features/assistant/assistant.routes";
+import medicalAlertRoutes from "@features/medical-alert/medical-alert.routes";
 import { logger } from "@/lib/logger";
 
 dotenv.config()
@@ -28,6 +29,7 @@ io.of("/med-scanner").on("connection" , handleVideoStreamConnection)
 
 // ── Express routes ────────────────────────────
 app.use("/api/assistant", assistantRoutes);
+app.use("/api/medical-alert", medicalAlertRoutes);
 
 // ── Express error handlers (must be AFTER all routes) ──
 app.use(notFoundHandler);
