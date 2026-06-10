@@ -36,6 +36,11 @@ setGlobalOptions({ maxInstances: 10 });
 const  { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { Firestore, FieldValue } = require("@google-cloud/firestore");
 const { GoogleGenAI, Type } = require("@google/genai");
+const admin = require("firebase-admin");
+
+admin.initializeApp();
+
+const firestore = admin.firestore();
 const dotenv = require("dotenv")
 
 dotenv.config();
@@ -48,7 +53,6 @@ const EMBEDDING_MODEL = "text-embedding-004";
 const EMBEDDING_FIELD = "name_embedding";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-const firestore = new Firestore({ projectId: PROJECT_ID });
 
 // Initialize the single, modern Google GenAI SDK client for Vertex AI
 const ai = new GoogleGenAI({
@@ -195,3 +199,6 @@ async function embedText(text) {
     }
   }
 );
+
+
+exports.embedMedicationOnWrite = embedMedicationOnWrite
