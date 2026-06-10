@@ -124,7 +124,7 @@ export async function handleMedicalAlert(
   }
 
   const userData = userDoc.data()!;
-  const userName = userData.name ?? "Unknown User";
+  const userName = userData.userName ?? "Unknown User";
   const emergencyConfig = userData.emergencyConfig;
 
   // 2. Validate emergency config exists and has contacts
