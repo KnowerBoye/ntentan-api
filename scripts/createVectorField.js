@@ -188,12 +188,12 @@ async function backfill() {
       const data = medDoc.data();
       const { name, dosage } = data;
 
-      // Skip if already embedded and not forcing
-    //   if (!FORCE && data[EMBEDDING_FIELD]) {
-    //     console.log(`  [skip] ${medDoc.id} — already embedded`);
-    //     skipped++;
-    //     continue;
-    //   }
+      // Skip if already embedded
+      if (data[EMBEDDING_FIELD]) {
+        console.log(`  [skip] ${medDoc.id} — already embedded`);
+        skipped++;
+        continue;
+      }
 
       if (!name) {
         console.warn(`  [skip] ${medDoc.id} — missing name`);

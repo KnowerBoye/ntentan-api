@@ -1,0 +1,140 @@
+flowchart TB
+    %% =========================
+    %% CLIENT
+    %% =========================
+    subgraph Client["Flutter Mobile Client"]
+        Cam["Camera<br/>(JPEG frames)"]
+        Mic["Mic<br/>(audio in)"]
+        Chat["Chat UI<br/>(text)"]
+        TTS_Out["TTS Playback"]
+    end
+
+    %% =========================
+    %% API GATEWAY / AUTH
+    %% =========================
+    subgraph API["Node.js API — Express 5 + Socket.IO"]
+        Auth["Firebase ID Token Verify<br/>(HTTP + WS middleware)"]
+    end
+
+    Cam -- "WSS /med-scanner<br/>frame event" --> Auth
+    Mic -- "HTTPS /api/assistant/chat" --> Auth
+    Chat -- "HTTPS /api/assistant/chat" --> Auth
+
+    %% =========================
+    %% FEATURE 1: SCANNER
+    %% =========================
+    subgraph Scanner["Feature 1 — Medication Scanner (Real-Time VLM)"]
+        direction TB
+        Buffer["Frame Pipeline<br/>• buffer max 5<br/>• flush 800ms<br/>• inflight mutex<br/>• latest-frame-wins"]
+        VLM1["Gemini 2.5 Flash (VLM)<br/>multi-image + system prompt<br/>responseSchema:<br/>status | instruction | medication"]
+        Extract["Gemini 2.5 Flash (Extractor)<br/>2nd call — pharmacology fields<br/>brand/generic/strength/form<br/>+ confidence"]
+        QueryEmbed["Vertex text-embedding-005<br/>(query vector, 768-dim)"]
+        Zod1["Zod discriminated union<br/>medScannerResponseSchema"]
+    end
+
+    Auth --> Buffer
+    Buffer -- "N JPEGs (inlineData)" --> VLM1
+    VLM1 -- "status=positioning/no_object" --> Zod1
+    VLM1 -- "status=success<br/>{drug_name, raw_label_text[]}" --> Extract
+    Extract -- "structured fields" --> QueryEmbed
+
+    %% =========================
+    %% FEATURE 2: ASSISTANT
+    %% =========================
+    subgraph Assistant["Feature 2 — Medical Assistant (Agentic Chat)"]
+        direction TB
+        LangRouter{{"Language Router<br/>en | twi"}}
+        AgentLoop["Gemini 2.5 Flash Agent Loop<br/>temp=0.2, maxTokens=1024<br/>systemInstruction + tools<br/>Promise.all on functionCalls"]
+
+        subgraph Tools["Declared Tools"]
+            T1["query_prescriptions<br/>(intent: next / info / all_active)<br/>semantic match, cos ≥ 0.6"]
+            T2["search_drug_info<br/>OpenFDA /drug/label.json<br/>+ LLM supplement fallback"]
+            T3["save_prescription<br/>writes users/{uid}/medications"]
+        end
+
+        AudioIn["English audio → inlineData<br/>(Gemini native multimodal)"]
+    end
+
+    subgraph Voice["Twi Voice Pipeline (Ghana NLP)"]
+        STT["twiSTT (ASR)<br/>audio → Twi text"]
+        MT_in["twiToEnglish (MT tw-en)"]
+        MT_out["englishToTwi (MT en-tw)"]
+        TwiTTS["twiTTS<br/>Twi text → audio"]
+    end
+
+    Auth --> LangRouter
+    LangRouter -- "twi audio" --> STT --> MT_in --> AgentLoop
+    LangRouter -- "en audio" --> AudioIn --> AgentLoop
+    LangRouter -- "en text" --> AgentLoop
+    AgentLoop -- "functionCall parts" --> Tools
+    Tools -- "functionResponse parts" --> AgentLoop
+    AgentLoop -- "final English text" --> MT_out --> TwiTTS --> TTS_Out
+    AgentLoop -- "en text" --> Chat
+
+    %% =========================
+    %% EMBEDDINGS & VECTOR SEARCH (shared)
+    %% =========================
+    subgraph Embeds["Shared Embedding + Retrieval"]
+        direction TB
+        EmbedSvc["Vertex text-embedding-005<br/>lib/embeddings.ts"]
+        KNN["Firestore findNearest<br/>vectorField: name_embedding<br/>COSINE, 768-dim<br/>scanner τ≤0.15 · assistant τ≥0.6"]
+    end
+
+    QueryEmbed --> KNN
+    T1 -- "embed user phrasing" --> EmbedSvc --> KNN
+    KNN -- "top-K + distance" --> Zod1
+    KNN -- "matched meds" --> T1
+    Zod1 -- "JSON response event" --> Cam
+
+    %% =========================
+    %% BACKGROUND EMBEDDING PIPELINE
+    %% =========================
+    subgraph CF["Firebase Cloud Functions v2"]
+        Trigger["embedMedicationOnWrite<br/>onWrite users/{uid}/medications/{id}"]
+        Composite["buildCompositeString(name, dosage)<br/>LLM enrichment (INN, class,<br/>indications, synonyms)"]
+        CFEmbed["text-embedding-005<br/>→ VectorValue(768)"]
+    end
+
+    T3 -- "fire-and-forget<br/>embedText(name)" --> EmbedSvc
+    T3 --> FS
+    Trigger --> Composite --> CFEmbed --> FS
+
+    %% =========================
+    %% DATA STORES
+    %% =========================
+    subgraph Data["Firestore (per-tenant users/{uid}/...)"]
+        FS[("medications/*<br/>name, dosage, timeSlots,<br/>composite_string,<br/>name_embedding: VectorValue")]
+        Cfg[("emergencyConfig.contacts")]
+    end
+
+    FS --> KNN
+
+    %% =========================
+    %% EXTERNAL AI / DATA APIs
+    %% =========================
+    subgraph Ext["External Services"]
+        Gemini[["Google Gemini 2.5 Flash<br/>@google/genai"]]
+        Vertex[["Vertex AI<br/>text-embedding-005"]]
+        FDA[["OpenFDA<br/>drug/label.json"]]
+        GhanaNLP[["Ghana NLP<br/>STT · MT · TTS"]]
+    end
+
+    VLM1 -.-> Gemini
+    Extract -.-> Gemini
+    AgentLoop -.-> Gemini
+    Composite -.-> Gemini
+    EmbedSvc -.-> Vertex
+    CFEmbed -.-> Vertex
+    QueryEmbed -.-> Vertex
+    T2 -.-> FDA
+    STT -.-> GhanaNLP
+    MT_in -.-> GhanaNLP
+    MT_out -.-> GhanaNLP
+    TwiTTS -.-> GhanaNLP
+
+    classDef ext fill:#eef,stroke:#557,stroke-width:1px
+    classDef store fill:#efe,stroke:#494
+    classDef model fill:#fee,stroke:#a44
+    class Gemini,Vertex,FDA,GhanaNLP ext
+    class FS,Cfg store
+    class VLM1,Extract,AgentLoop,Composite,EmbedSvc,CFEmbed,QueryEmbed,STT,MT_in,MT_out,TwiTTS model
