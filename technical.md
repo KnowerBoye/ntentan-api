@@ -10,6 +10,8 @@ This document describes the current architecture, the AI/ML systems and how they
 
 ### 1.1 Architectural shape
 
+![Ntentan architecture diagram](./architecture.svg)
+
 ```
 ┌───────────────────────────┐        ┌────────────────────────────────┐
 │   Flutter mobile client   │        │   Firebase (Auth · Firestore)  │

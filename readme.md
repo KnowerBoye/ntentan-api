@@ -4,7 +4,7 @@ WebSocket API server for medication scanning and medical assistant services, pow
 
 ---
 
-## 🔐 Authentication
+## Authentication
 
 ### HTTP Endpoints
 All HTTP endpoints (e.g. `/api/assistant/chat`) require Firebase JWT authentication via the `Authorization` header.
@@ -27,7 +27,7 @@ If the token is missing or invalid, the connection or request is rejected with a
 
 ---
 
-## 📷 Medication Scanner (WebSocket)
+## Medication Scanner (WebSocket)
 
 The `med-scanner` namespace provides real-time medication label scanning. The client streams camera frames, and the server uses Gemini 2.5 Flash to provide positioning feedback until the label is successfully read, then performs vector similarity search against the user's saved medications.
 
@@ -216,17 +216,17 @@ socket.on("response", (jsonString) => {
 
   switch (data.status) {
     case "processing":
-      console.log("⏳ Processing frames...");
+      console.log("Processing frames...");
       break;
 
     case "positioning":
     case "no_object":
-      console.log(`📐 ${data.instruction} — ${data.guidance_text}`);
+      console.log(`${data.instruction} — ${data.guidance_text}`);
       // Show arrow/instruction UI to the user
       break;
 
     case "success":
-      console.log(`✅ ${data.guidance_text}`);
+      console.log(`${data.guidance_text}`);
       if (data.prescription_match) {
         console.log("Matched medication:", data.prescription_match.medication.name);
         console.log("Match confidence:", data.prescription_match.distance);
@@ -286,19 +286,19 @@ class MedScannerService {
 
     switch (status) {
       case 'processing':
-        print('⏳ Processing...');
+        print('Processing...');
         break;
 
       case 'positioning':
       case 'no_object':
         final instruction = response['instruction'] as String;
         final guidance = response['guidance_text'] as String;
-        print('📐 $instruction — $guidance');
+        print('$instruction — $guidance');
         // Update UI with instruction arrow
         break;
 
       case 'success':
-        print('✅ ${response['guidance_text']}');
+        print('${response['guidance_text']}');
         final match = response['prescription_match'];
         if (match != null) {
           final med = match['medication'] as Map<String, dynamic>;
@@ -316,7 +316,7 @@ class MedScannerService {
 
 ---
 
-## 🤖 Medical Assistant (REST API)
+## Medical Assistant (REST API)
 
 The assistant is available via an **HTTP REST endpoint** (no WebSocket). The client owns and sends the full conversation history with each request, making the API stateless and suitable for serverless environments.
 
@@ -330,8 +330,8 @@ POST /api/assistant/chat
 
 | Header | Value | Required |
 | :----- | :---- | :------- |
-| `Authorization` | `Bearer <FIREBASE_ID_TOKEN>` | ✅ Yes |
-| `Content-Type` | `application/json` | ✅ Yes |
+| `Authorization` | `Bearer <FIREBASE_ID_TOKEN>` | Yes |
+| `Content-Type` | `application/json` | Yes |
 
 ### **Workflow**
 
@@ -397,7 +397,7 @@ When the query language is `"english"`:
 {
   "status": "success",
   "data": {
-    "message": "Based on your prescriptions, you need to take:\n\n- **Metformin 500mg** — 1 tablet (Morning with breakfast)\n- **Lisinopril 10mg** — 1 tablet (Morning)\n\nRemember to take them with food! ⚕️",
+    "message": "Based on your prescriptions, you need to take:\n\n- **Metformin 500mg** — 1 tablet (Morning with breakfast)\n- **Lisinopril 10mg** — 1 tablet (Morning)\n\nRemember to take them with food!",
     "history": [
       { "content": "...", "type": "text", "role": "user", "language": "english" },
       { "content": "Based on your prescriptions...", "type": "text", "role": "assistant", "language": "english" }
@@ -451,8 +451,8 @@ The assistant's English response is automatically translated back to the user's 
 
 | User Language | Response Language | Audio | Processing |
 | :------------ | :---------------- | :---- | :--------- |
-| `english` | English | ❌ None | Returned as-is |
-| `twi` | Twi | ✅ Base64 MP3 (via `audio` field) | Translated English → Twi via Ghana NLP API, then synthesized to speech |
+| `english` | English | None | Returned as-is |
+| `twi` | Twi | Base64 MP3 (via `audio` field) | Translated English → Twi via Ghana NLP API, then synthesized to speech |
 
 ### **Example: JavaScript (Fetch API)**
 
@@ -595,7 +595,7 @@ curl -X POST https://your-server.com/api/assistant/chat \
 
 ---
 
-## 🆘 Medical Alert (REST API)
+## Medical Alert (REST API)
 
 The medical alert endpoint sends an **emergency SMS alert** with a Google Maps location link to all emergency contacts configured for the authenticated user's profile.
 
@@ -609,8 +609,8 @@ POST /api/medical-alert/send
 
 | Header | Value | Required |
 | :----- | :---- | :------- |
-| `Authorization` | `Bearer <FIREBASE_ID_TOKEN>` | ✅ Yes |
-| `Content-Type` | `application/json` | ✅ Yes |
+| `Authorization` | `Bearer <FIREBASE_ID_TOKEN>` | Yes |
+| `Content-Type` | `application/json` | Yes |
 
 ### **Workflow**
 
@@ -714,7 +714,7 @@ sendMedicalAlert("<FIREBASE_ID_TOKEN>", 5.6037, -0.1870)
   .then((data) => {
     console.log("Contacts notified:", data.notified_contacts.length);
     data.notified_contacts.forEach((c) => {
-      console.log(`${c.name} (${c.phoneNumber}): ${c.success ? "✅" : "❌"}`);
+      console.log(`${c.name} (${c.phoneNumber}): ${c.success ? "" : ""}`);
     });
   })
   .catch(console.error);
@@ -743,7 +743,7 @@ The medical alert feature requires an additional environment variable beyond the
 
 ---
 
-## 🛠️ Environment Variables
+## Environment Variables
 
 Create a `.env` file in the project root:
 
@@ -757,7 +757,7 @@ GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account-key.json
 
 ---
 
-## 🚀 Running Locally
+## Running Locally
 
 ```bash
 # Install dependencies
@@ -775,7 +775,7 @@ Open `playground/test.html` in a browser (served via a local HTTP server) to tes
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 src/
