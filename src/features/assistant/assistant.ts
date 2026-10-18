@@ -5,11 +5,15 @@ import { searchDrugInfo } from "@features/assistant/drugInfo.tools";
 import {
   ChatMessage,
   AssistantResponse,
+  AssistantStreamEvent,
   QueryPrescriptionsInput,
   SavePrescriptionInput,
   SearchDrugInfoInput,
   UserMessage as UserMessage,
 } from "@/types/assistant";
+
+// Hard cap on agent loop iterations — prevents a runaway tool-call loop.
+const MAX_AGENT_TURNS = 6;
 
 
 function buildSystemPrompt(): string {
@@ -243,5 +247,118 @@ export class MedicalAssistant {
         parts: toolResultParts,
       });
     }
+  }
+
+  /**
+   * Streaming variant of {@link chat}. Yields:
+   *  - `tool`  events when tool calls are dispatched (for UI status).
+   *  - `delta` events with text chunks of the final answer as they arrive.
+   *  - `final` event once, with the full message + metadata.
+   *
+   * Note: Gemini returns either function-call parts OR user-facing text in a
+   * given turn, so streaming text deltas live is safe — tool-call turns carry
+   * no displayable text.
+   */
+  async *chatStream(
+    userMessage: UserMessage,
+    userId: string,
+    history: ChatMessage[] = []
+  ): AsyncGenerator<AssistantStreamEvent> {
+    const toolsUsed: string[] = [];
+    const sources: string[] = [];
+
+    const contents: Content[] = [
+      ...history.map((m): Content => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{
+          text: m.type === "audio" ? "[User sent an audio message]" : m.content
+        }]
+      })),
+      {
+        role: "user",
+        parts:
+          userMessage.type === "audio"
+            ? [{ inlineData: { mimeType: "audio/wav", data: userMessage.content } }]
+            : [{ text: userMessage.content }],
+      },
+    ];
+
+    for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
+      const stream = await this.ai.models.generateContentStream({
+        model: this.model,
+        config: {
+          temperature: 0.2,
+          maxOutputTokens: 1024,
+          systemInstruction: buildSystemPrompt(),
+          tools,
+        },
+        contents,
+      });
+
+      let turnText = "";
+      const functionCallParts: NonNullable<Content["parts"]> = [];
+      const calls: FunctionCall[] = [];
+
+      for await (const chunk of stream) {
+        const parts = chunk.candidates?.[0]?.content?.parts;
+        if (!parts) continue;
+
+        for (const part of parts) {
+          if (part.functionCall) {
+            functionCallParts.push(part);
+            calls.push(part.functionCall);
+          } else if (part.text) {
+            turnText += part.text;
+            yield { type: "delta", text: part.text };
+          }
+        }
+      }
+
+      // Record the model turn so the tool protocol stays coherent.
+      const modelParts: NonNullable<Content["parts"]> = [
+        ...(turnText ? [{ text: turnText }] : []),
+        ...functionCallParts,
+      ];
+      contents.push({ role: "model", parts: modelParts });
+
+      if (!calls.length) {
+        yield {
+          type: "final",
+          message: turnText || "I'm sorry, I couldn't generate a response.",
+          toolsUsed,
+          sources: sources.length ? Array.from(new Set(sources)) : undefined,
+        };
+        return;
+      }
+
+      // Announce tool calls before running them (drives UI status), then
+      // dispatch them all in parallel.
+      for (const call of calls) yield { type: "tool", name: call.name! };
+
+      const toolResultParts = await Promise.all(
+        calls.map(async (call) => {
+          toolsUsed.push(call.name!);
+          const { result, isSearch } = await dispatchTool(call, userId);
+          if (isSearch) {
+            const data = (result as { data?: { citations?: string[]; source?: string } })?.data;
+            if (data?.citations?.length) sources.push(...data.citations);
+            else if (data?.source === "openfda" || data?.source === "llm+openfda") {
+              sources.push("OpenFDA Drug Label Database");
+            }
+          }
+          return { functionResponse: { name: call.name!, response: { result } } };
+        })
+      );
+
+      contents.push({ role: "user", parts: toolResultParts });
+    }
+
+    // Hit the turn cap without a final text answer.
+    yield {
+      type: "final",
+      message: "I'm having trouble completing that request right now. Please try rephrasing.",
+      toolsUsed,
+      sources: sources.length ? Array.from(new Set(sources)) : undefined,
+    };
   }
 }

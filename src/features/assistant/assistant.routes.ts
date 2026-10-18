@@ -3,7 +3,7 @@ import { authMiddleware } from "@middlewares/auth.middleware";
 import validate from "@middlewares/validator.middleware";
 import { asyncHandler } from "@middlewares/error-handler.middleware";
 import { QueryAgentSchema } from "@features/assistant/assistant.schema";
-import { handleAssistantChat } from "@features/assistant/assistant.service";
+import { handleAssistantChat, handleAssistantChatStream } from "@features/assistant/assistant.service";
 import { ChatMessage, UserMessage } from "@/types/assistant";
 import { logger } from "@/lib/logger";
 
@@ -45,11 +45,65 @@ router.post(
     const result = await handleAssistantChat(userMessage, userId, history);
 
 
-    logger.debug(result.toString())
+    logger.debug("Assistant chat completed", { toolsUsed: result.history.length });
     res.json({
       status: "success",
       data: result,
     });
+  })
+);
+
+/**
+ * POST /api/assistant/chat/stream
+ *
+ * Streaming (SSE) variant of /chat. Same body + auth. Emits events:
+ *   event: tool  → { name }            tool call dispatched (UI status)
+ *   event: delta → { text }            incremental answer text
+ *   event: done  → { message, history, toolsUsed, sources?, audio? }
+ *   event: error → { message }
+ *
+ * English requests stream token-by-token; Twi requests emit the translated
+ * text as one delta immediately before `done` (plus synthesised audio).
+ */
+router.post(
+  "/chat/stream",
+  authMiddleware,
+  validate(QueryAgentSchema),
+  asyncHandler(async (req, res) => {
+    const { query, history, language } = req.validated!.body as {
+      query: { content: string; type: "text" | "audio" };
+      history: ChatMessage[];
+      language: "english" | "twi";
+    };
+
+    const userId = req.user!.uid;
+    const userMessage: UserMessage = { content: query.content, type: query.type, language };
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+
+    let clientClosed = false;
+    req.on("close", () => { clientClosed = true; });
+
+    const send = (event: string, data: unknown) =>
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+    try {
+      for await (const ev of handleAssistantChatStream(userMessage, userId, history)) {
+        if (clientClosed) break;
+        send(ev.event, ev.data);
+      }
+    } catch (err) {
+      logger.error("Assistant stream failed", {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      if (!clientClosed) send("error", { message: "Assistant failed to complete the response." });
+    } finally {
+      res.end();
+    }
   })
 );
 

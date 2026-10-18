@@ -110,6 +110,12 @@ export interface AssistantResponse {
   sources?: string[];
 }
 
+/** Events yielded by the streaming agent loop (MedicalAssistant.chatStream). */
+export type AssistantStreamEvent =
+  | { type: "tool"; name: string }
+  | { type: "delta"; text: string }
+  | { type: "final"; message: string; toolsUsed: string[]; sources?: string[] };
+
 
 export interface ChatMessage {
   content : string  , 

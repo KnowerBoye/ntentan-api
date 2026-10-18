@@ -85,3 +85,94 @@ export async function handleAssistantChat(
     ...(audioBuffer && { audio: audioBuffer.toString("base64") }),
   };
 }
+
+/** A single Server-Sent Event: an event name + JSON-serialisable payload. */
+export interface AssistantSSEEvent {
+  event: "tool" | "delta" | "done" | "error";
+  data: unknown;
+}
+
+/**
+ * Streaming variant of {@link handleAssistantChat} (SSE).
+ *
+ * Emits `tool` and `delta` events as the agent works, then a terminal `done`
+ * event with the full message, updated history, and (for Twi) audio.
+ *
+ * English requests stream token deltas live. Twi requests cannot stream
+ * token-by-token (the whole English answer must be translated + synthesised
+ * first), so their deltas are suppressed and the translated text is emitted as
+ * a single delta immediately before `done`.
+ */
+export async function* handleAssistantChatStream(
+  query: UserMessage,
+  userId: string,
+  history: ChatMessage[]
+): AsyncGenerator<AssistantSSEEvent> {
+  const assistant = new MedicalAssistant(process.env.GEMINI_API_KEY || "");
+  const isTwi = query.language === "twi";
+
+  // ── 1. Prepare the query (same routing as the non-streaming path) ──
+  const preparedQuery: UserMessage = {
+    type: "text",
+    content: "",
+    language: query.language,
+  };
+
+  if (query.type === "audio") {
+    if (query.language === "twi") {
+      preparedQuery.type = "text";
+      preparedQuery.content = await handleTwiAudio(query.content);
+    } else {
+      preparedQuery.type = "audio";
+      preparedQuery.content = query.content;
+    }
+  } else {
+    preparedQuery.content =
+      query.language === "twi" ? await twiToEnglish(query.content) : query.content;
+    preparedQuery.type = "text";
+  }
+
+  // ── 2. Stream the agent loop ──
+  for await (const ev of assistant.chatStream(preparedQuery, userId, history)) {
+    if (ev.type === "tool") {
+      yield { event: "tool", data: { name: ev.name } };
+      continue;
+    }
+
+    if (ev.type === "delta") {
+      // English streams live; Twi deltas are English tokens — not useful.
+      if (!isTwi) yield { event: "delta", data: { text: ev.text } };
+      continue;
+    }
+
+    // ev.type === "final"
+    let finalMessage = ev.message;
+    let responseLanguage: SupportedLanguage = "english";
+    let audioBuffer: Buffer | undefined;
+
+    if (isTwi) {
+      finalMessage = await englishToTwi(ev.message);
+      responseLanguage = "twi";
+      audioBuffer = await twiTTS(finalMessage);
+      // Surface the translated text now (Twi had no live deltas).
+      yield { event: "delta", data: { text: finalMessage } };
+    }
+
+    const updatedHistory: ChatMessage[] = [
+      ...history,
+      { ...preparedQuery, role: "user" },
+      { content: finalMessage, role: "assistant", language: responseLanguage, type: "text" },
+    ];
+
+    yield {
+      event: "done",
+      data: {
+        message: finalMessage,
+        history: updatedHistory,
+        toolsUsed: ev.toolsUsed,
+        ...(ev.sources && { sources: ev.sources }),
+        ...(audioBuffer && { audio: audioBuffer.toString("base64") }),
+      },
+    };
+  }
+}
