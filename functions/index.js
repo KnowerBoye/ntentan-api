@@ -49,7 +49,10 @@ dotenv.config();
 
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID;
 const LOCATION = "us-central1";
-const EMBEDDING_MODEL = "text-embedding-004";
+// Must match the model used for query embeddings in the API
+// (src/lib/embeddings.ts + medscanner.service.ts) or cosine distances
+// between stored docs and queries are meaningless.
+const EMBEDDING_MODEL = "text-embedding-005";
 const EMBEDDING_FIELD = "name_embedding";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 

@@ -123,9 +123,9 @@ export function handleVideoStreamConnection(clientWs :Socket){
 
 
 // per connection state
-    let frameBuffer : string[]  = [];   
+    let frameBuffer : string[]  = [];
     let isInferring   = false; // inference gate: true while model is working
-    let flushTimer    = null;  // interval that triggers periodic flushes
+    let flushTimer : NodeJS.Timeout; // interval that triggers periodic flushes
 
 
 
@@ -277,12 +277,13 @@ export function handleVideoStreamConnection(clientWs :Socket){
             flushBuffer();
         }
 
-        clientWs.on("disconnect" , ()=>{
-            clearInterval(flushTimer)
-            frameBuffer = []
-        })
-
     } )
+
+    // Cleanup once per connection (not per frame)
+    clientWs.on("disconnect" , ()=>{
+        clearInterval(flushTimer)
+        frameBuffer = []
+    })
 
 
 
@@ -499,7 +500,7 @@ export async function searchUserMedications(userId : string, extractedFields : M
     const distance = data.vector_distance ?? null;
 
     return {
-      medication: { ...doc.data() } as Medication,
+      medication: { id: doc.id, ...doc.data() } as Medication,
       distance,
       withinThreshold:
         distance !== null ? distance <= DISTANCE_THRESHOLD : false,
