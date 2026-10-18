@@ -77,6 +77,10 @@ export interface DrugInfo {
   commonSideEffects?: string[];
   warnings?: string[];
   interactions?: string[];
+  /** Free-text grounded summary (when web-search grounding was used) */
+  summary?: string;
+  /** Source URLs backing a grounded answer */
+  citations?: string[];
   source: "llm" | "openfda" | "llm+openfda";
   needsLLMSupplement: boolean;
 }

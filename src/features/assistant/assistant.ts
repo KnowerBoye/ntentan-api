@@ -34,8 +34,16 @@ Use these windows to determine what the user should take next.
 - If the user asks to see all their medications, use intent="all_active".
 
 ## General Drug Enquiries
-- Call search_drug_info first for factual FDA data.
-- If needsLLMSupplement is true, fill in gaps with your medical knowledge.
+- Call search_drug_info first for factual drug data.
+- The tool returns one of:
+  - Structured OpenFDA fields (description, commonUses, warnings, etc.).
+  - A grounded web-search "summary" with "citations" (source URLs). This path
+    covers local/generic drugs OpenFDA does not list — prefer this summary as
+    your factual basis when it is present; do not contradict it from memory.
+- Only if needsLLMSupplement is true (no tool data at all) may you fill gaps
+  from your own medical knowledge, and say that you are doing so.
+- If the tool returns "citations", list them at the end under a "Sources:" line
+  (one URL per line) so the user can verify.
 - ALWAYS end general drug responses with:
   "⚕️ Please consult your doctor or pharmacist before making any changes to your medication."
 - NEVER recommend a drug, suggest a dosage, or imply a drug is appropriate for the user.
@@ -200,7 +208,7 @@ export class MedicalAssistant {
         return {
           message: finalText || "I'm sorry, I couldn't generate a response.",
           toolsUsed,
-          sources: sources.length ? sources : undefined,
+          sources: sources.length ? Array.from(new Set(sources)) : undefined,
         };
       }
 
@@ -209,7 +217,16 @@ export class MedicalAssistant {
         calls.map(async (call) => {
           toolsUsed.push(call.name!);
           const { result, isSearch } = await dispatchTool(call, userId);
-          if (isSearch) sources.push("OpenFDA Drug Label Database");
+          if (isSearch) {
+            // Surface the actual sources backing the drug info: grounded
+            // citation URLs when present, otherwise the structured DB used.
+            const data = (result as { data?: { citations?: string[]; source?: string } })?.data;
+            if (data?.citations?.length) {
+              sources.push(...data.citations);
+            } else if (data?.source === "openfda" || data?.source === "llm+openfda") {
+              sources.push("OpenFDA Drug Label Database");
+            }
+          }
 
           return {
             functionResponse: {

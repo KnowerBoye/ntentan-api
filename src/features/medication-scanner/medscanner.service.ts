@@ -94,6 +94,18 @@ const RESPONSE_SCHEMA = {
 const BUFFER_MAX_FRAMES = 5;       // max frames to accumulate before forcing a flush
 const BUFFER_FLUSH_INTERVAL_MS = 800; // flush every N ms even if buffer isn't full
 
+// ── Model tiering ────────────────────────────
+// The tight positioning loop is a trivial vision classification ("move left",
+// "hold still") — run it on the cheapest/fastest tier with thinking disabled.
+// Full pharmacology extraction (extractMedicationFields) stays on flash.
+const POSITIONING_MODEL = "gemini-2.5-flash-lite";
+const EXTRACTION_MODEL = "gemini-2.5-flash";
+
+// Once a label is read, don't re-run the expensive extraction + embed +
+// vector-search while the same label keeps sitting in frame. Positioning ticks
+// (cheap) keep running; extraction is debounced by this cooldown.
+const SUCCESS_COOLDOWN_MS = 5000;
+
 
 const ai = new GoogleGenAI({ 
   // vertexai: true,
@@ -126,6 +138,7 @@ export function handleVideoStreamConnection(clientWs :Socket){
     let frameBuffer : string[]  = [];
     let isInferring   = false; // inference gate: true while model is working
     let flushTimer : NodeJS.Timeout; // interval that triggers periodic flushes
+    let lastSuccessAt = 0; // timestamp of last emitted success (extraction debounce)
 
 
 
@@ -161,14 +174,18 @@ export function handleVideoStreamConnection(clientWs :Socket){
 
 
         const response = await ai.models.generateContent({
-        model: "models/gemini-2.5-flash",
+        model: POSITIONING_MODEL,
         contents: [{ role: "user", parts }],
         config : {
-            responseMimeType : "application/json" , 
-            responseModalities : [Modality.TEXT] , 
-            responseSchema : RESPONSE_SCHEMA
+            responseMimeType : "application/json" ,
+            responseModalities : [Modality.TEXT] ,
+            responseSchema : RESPONSE_SCHEMA,
+            // Positioning is a reflex, not a reasoning task — skip thinking and
+            // cap output to keep each tick well under the latency budget.
+            thinkingConfig: { thinkingBudget: 0 },
+            maxOutputTokens: 512,
         }
-     
+
         });
 
         const candidate = response.candidates?.[0];
@@ -185,6 +202,13 @@ export function handleVideoStreamConnection(clientWs :Socket){
         let result = JSON.parse(text)
 
         if(result.status === "success"){
+
+          // Debounce: the label is readable, but we already extracted + matched
+          // it moments ago. Skip the expensive second Gemini call + embed +
+          // vector search while it keeps sitting in frame.
+          if (Date.now() - lastSuccessAt < SUCCESS_COOLDOWN_MS) {
+            return;
+          }
 
           const {drug_name , raw_label_text} = result.medication
 
@@ -213,6 +237,7 @@ export function handleVideoStreamConnection(clientWs :Socket){
 
           if (clientWs.connected) {
             emitMedScannerResponse(clientWs, successResponse);
+            lastSuccessAt = Date.now();
           }
         } else {
           // positioning / no_object — forward from Gemini as-is
@@ -308,7 +333,7 @@ export async function extractMedicationFields(ocrResult : {drug_name : string , 
   ].join("\n");
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash", 
+    model: EXTRACTION_MODEL,
     contents: [
       `You are a pharmacology assistant helping to structure medication label data for a prescription lookup system.
 

@@ -1,8 +1,19 @@
 
 import axios from "axios";
+import { GoogleGenAI } from "@google/genai";
 import { DrugInfo, ToolResult, SearchDrugInfoInput } from "@/types/assistant";
+import { logger } from "@/lib/logger";
 
 const OPENFDA_BASE = "https://api.fda.gov/drug";
+
+// Lazy GenAI client for grounded (web-search) drug lookups.
+let _genai: GoogleGenAI | null = null;
+function getGenAI(): GoogleGenAI {
+  if (!_genai) {
+    _genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+  return _genai;
+}
 
 interface OpenFDALabelResult {
   openfda?: {
@@ -56,37 +67,120 @@ async function queryOpenFDA(drugName: string): Promise<Partial<DrugInfo> | null>
   }
 }
 
+/**
+ * Grounded drug lookup via Gemini + Google Search.
+ *
+ * OpenFDA is US-centric and returns nothing for most Ghanaian/generic brand
+ * names — exactly our users' meds. A grounded web search identifies the drug
+ * and returns a factual summary plus the source URLs backing it.
+ */
+async function queryGroundedDrugInfo(
+  drugName: string,
+  query?: string
+): Promise<Partial<DrugInfo> | null> {
+  const focus = query ? ` The user specifically wants to know about: ${query}.` : "";
+
+  const prompt = `Provide concise, factual information about the medication "${drugName}".${focus}
+
+Cover, where applicable:
+- what it is (generic / active ingredient and pharmacologic class)
+- common uses / conditions treated
+- common side effects
+- important warnings
+- notable drug interactions
+
+This may be a medication sold in Ghana or West Africa under a local brand or generic name — use web sources to identify it. Do NOT recommend a dosage or imply the drug is appropriate for any individual. If you cannot confidently identify the drug, say so plainly.`;
+
+  try {
+    const response = await getGenAI().models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        temperature: 0.2,
+        // Google Search grounding cannot be combined with a JSON responseSchema,
+        // so we take the grounded free-text summary + citation URIs instead.
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    const summary = response.text?.trim();
+    if (!summary) return null;
+
+    const chunks =
+      response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+    const citations = Array.from(
+      new Set(
+        chunks
+          .map((c) => c.web?.uri)
+          .filter((u): u is string => !!u)
+      )
+    );
+
+    return {
+      name: drugName,
+      summary,
+      description: summary.substring(0, 600),
+      citations: citations.length ? citations : undefined,
+    };
+  } catch (err) {
+    logger.warn("Grounded drug lookup failed", {
+      drugName,
+      error: String(err),
+    });
+    return null;
+  }
+}
+
 export async function searchDrugInfo(
   input: SearchDrugInfoInput
 ): Promise<ToolResult<DrugInfo>> {
   try {
     const fdaData = await queryOpenFDA(input.drugName);
 
-    if (fdaData) {
-      const hasEnoughData =
-        !!fdaData.description &&
-        !!fdaData.commonUses?.length &&
-        !!fdaData.commonSideEffects?.length;
+    const fdaHasEnough =
+      !!fdaData &&
+      !!fdaData.description &&
+      !!fdaData.commonUses?.length &&
+      !!fdaData.commonSideEffects?.length;
 
+    // Fast path: OpenFDA already has rich structured data.
+    if (fdaData && fdaHasEnough) {
       return {
         success: true,
         data: {
+          ...fdaData,
           name: input.drugName,
           source: "openfda",
-          needsLLMSupplement: !hasEnoughData,
-          ...fdaData,
+          needsLLMSupplement: false,
         } as DrugInfo,
       };
     }
 
-    // Not in FDA DB – signal LLM to use its own knowledge
+    // OpenFDA missing or thin → grounded web search (covers local/generic drugs).
+    const grounded = await queryGroundedDrugInfo(input.drugName, input.query);
+
+    if (grounded) {
+      return {
+        success: true,
+        data: {
+          name: input.drugName,
+          ...fdaData,     // keep any partial structured fields FDA did return
+          ...grounded,    // grounded summary + citations win
+          source: fdaData ? "llm+openfda" : "llm",
+          needsLLMSupplement: false,
+        } as DrugInfo,
+      };
+    }
+
+    // Last resort: let the main assistant model answer from its own knowledge.
     return {
       success: true,
       data: {
         name: input.drugName,
+        ...(fdaData ?? {}),
         source: "llm",
         needsLLMSupplement: true,
-      },
+      } as DrugInfo,
     };
   } catch (err) {
     return { success: false, error: String(err) };
